@@ -174,13 +174,19 @@ void system_stm32_init(void) noexcept {
     // PLL1CFGR: PLLSRC=HSE (01b), DIVM1=1 (M-1 = 0)
     RCC_PLL1CFGR = (1u << 0)   // PLLSRC = HSE (bits [1:0] = 01)
                  | (0u << 8);  // DIVM1 = 1 (valor M-1 = 0, bits [13:8])
-    // PLL1DIVR: N=125 (DIVN1 = N-1 = 124), P=4 (DIVP1 = P/2-1 = 1)
-    // Bits [8:0]  = DIVN1 (N-1) = 124 = 0x7C
-    // Bits [14:9] = DIVP1 (P/2-1) = 1
-    // Bits [22:16]= DIVQ1 — não usado, manter 0
+    // PLL1DIVR: N=125 (DIVN1 = N-1 = 124), P=4 (DIVP1 = P/2-1 = 1),
+    //           Q=16 (DIVQ1 = Q/2-1 = 7) → PLL1Q = 1000/16 = 62.5 MHz (FDCAN clock)
+    // VCO = HSE × N / M = 8 × 125 / 1 = 1000 MHz
+    // Bits [8:0]  = DIVN1 (N-1) = 124
+    // Bits [14:9] = DIVP1 (P/2-1) = 1  → PLL1P = 1000/4   = 250 MHz (SYSCLK)
+    // Bits [22:16]= DIVQ1 (Q/2-1) = 7  → PLL1Q = 1000/16  = 62.5 MHz (FDCAN)
     // Bits [30:24]= DIVR1 — não usado, manter 0
     RCC_PLL1DIVR = (124u << 0)   // DIVN1 = 124 → N = 125
-                 | (1u << 9);    // DIVP1 = 1   → P = 4
+                 | (1u << 9)     // DIVP1 = 1   → P = 4  → PLL1P = 250 MHz
+                 | (7u << 16);   // DIVQ1 = 7   → Q = 16 → PLL1Q = 62.5 MHz (FDCAN)
+
+    // Habilitar saída Q do PLL1 (necessário para FDCAN clock)
+    RCC_PLL1CFGR |= RCC_PLL1CFGR_PLL1QEN;
 
     // ── 4. Ligar PLL1 e aguardar lock ────────────────────────────────────
     // FIX: loop sem timeout → IWDG reseta após 3 s se PLL não fizer lock.
@@ -195,24 +201,29 @@ void system_stm32_init(void) noexcept {
         }
     }
 
-    // ── 5. Configurar prescalers APB (manter AHB = SYSCLK) ───────────────
+    // ── 5. Selecionar PLL1Q como clock source do FDCAN1/2 ────────────────
+    // PLL1Q = 62.5 MHz → bit timing can.cpp: NBRP+1=5, Tq=80ns → 500 kbps ✓
+    // Deve ser configurado antes de can0_init() habilitar FDCAN.
+    RCC_CCIPR5 = (RCC_CCIPR5 & ~0x3u) | RCC_CCIPR5_FDCAN12SEL_PLL1Q;
+
+    // ── 6. Configurar prescalers APB (manter AHB = SYSCLK) ───────────────
     // CFGR1: AHB prescaler = 1 (HPRE=0), APB1=/2 (PPRE1=100b), APB2=/2 (PPRE2=100b)
     // Para simplificar timers: usar APB1=APB2=HCLK/2 → timer clock = 2×APB = HCLK
     RCC_CFGR1 = (0u << 4)    // HPRE = 0  → HCLK = SYSCLK
               | (4u << 8)    // PPRE1 = 4 → APB1 = HCLK/2 = 125 MHz
               | (4u << 11);  // PPRE2 = 4 → APB2 = HCLK/2 = 125 MHz
 
-    // ── 6. Selecionar PLL1 como SYSCLK ───────────────────────────────────
+    // ── 7. Selecionar PLL1 como SYSCLK ───────────────────────────────────
     RCC_CFGR1 = (RCC_CFGR1 & ~0x7u) | RCC_CFGR1_SW_PLL1;
     while ((RCC_CFGR1 & (7u << 3)) != RCC_CFGR1_SWS_PLL1) { /* aguarda */ }
 
-    // ── 7. Habilitar clocks dos GPIOs ────────────────────────────────────
+    // ── 8. Habilitar clocks dos GPIOs ────────────────────────────────────
     // STM32H562RGT6 (LQFP64): apenas GPIOA/B/C disponíveis no package
     RCC_AHB2ENR1 |= RCC_AHB2ENR1_GPIOAEN
                   | RCC_AHB2ENR1_GPIOBEN
                   | RCC_AHB2ENR1_GPIOCEN;
 
-    // ── 8. Configurar SysTick @ 1 ms ─────────────────────────────────────
+    // ── 9. Configurar SysTick @ 1 ms ─────────────────────────────────────
     // ARM SysTick registers (CMSIS):
     //   0xE000E010 = STK_CTRL  (ENABLE | TICKINT | CLKSRC=processor)
     //   0xE000E014 = STK_LOAD
@@ -230,13 +241,13 @@ void system_stm32_init(void) noexcept {
     // ARM: SCB->SHP[11] = priority for SysTick (offset 0xE000ED23)
     *reinterpret_cast<volatile uint8_t*>(0xE000ED23u) = static_cast<uint8_t>(11u << 4u);
 
-    // ── 9. Reduzir IWDG para 100 ms (operação normal) ────────────────────
+    // ── 10. Reduzir IWDG para 100 ms (operação normal) ───────────────────
     // Boot completo: reduzir timeout de 3 s para 100 ms operacional.
     IWDG_KR  = IWDG_KR_ACCESS;   // Desbloqueia PR e RLR para reconfiguração
     IWDG_RLR = IWDG_RLR_100MS;   // Reload = 99 → 99/1000 ≈ 99 ms
     IWDG_KR  = IWDG_KR_REFRESH;  // Kick após reconfiguração
 
-    // ── 10. Configurar MPU (proteção de stack + Flash + periféricos) ──────
+    // ── 11. Configurar MPU (proteção de stack + Flash + periféricos) ──────
     mpu_init();
 }
 

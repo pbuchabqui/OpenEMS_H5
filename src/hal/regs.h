@@ -59,6 +59,17 @@
 #define RCC_CFGR2       STM32_REG32(RCC_BASE + 0x020)
 #define RCC_PLL1CFGR    STM32_REG32(RCC_BASE + 0x028)
 #define RCC_PLL1DIVR    STM32_REG32(RCC_BASE + 0x034)
+#define RCC_CCIPR5      STM32_REG32(RCC_BASE + 0x0CC)  // Peripheral clock source select 5
+
+// RCC_PLL1CFGR bits
+#define RCC_PLL1CFGR_PLL1QEN  (1u << 18)  // Enable PLL1 Q output (→ FDCAN clock)
+
+// RCC_CCIPR5 bits — FDCAN1/2 clock source (bits [1:0])
+// 00 = rcc_hclk1 (250 MHz) — DON'T USE: too fast for NBRP=4 config
+// 01 = rcc_pll1_q_ck        — USE: PLL1Q configured for 62.5 MHz in system_stm32_init()
+// 10 = rcc_pll2_p_ck
+// 11 = rcc_hse_ck (8 MHz)   — DON'T USE: would require NBRP change
+#define RCC_CCIPR5_FDCAN12SEL_PLL1Q  (1u << 0)  // Select PLL1Q as FDCAN clock
 #define RCC_AHB1ENR     STM32_REG32(RCC_BASE + 0x0E8)
 #define RCC_AHB2ENR1    STM32_REG32(RCC_BASE + 0x0EC)
 #define RCC_AHB2ENR2    STM32_REG32(RCC_BASE + 0x0F0)
