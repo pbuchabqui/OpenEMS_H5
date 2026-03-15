@@ -54,16 +54,31 @@ ems::drv::SensorData make_sensors() {
 
 // ─── test 1: bit timing ──────────────────────────────────────────────────────
 
-void test_can_init_programs_bit_timing() {
-    // STM32H562 uses FDCAN1 with NBTP register (not FlexCAN CTRL1).
-    // The EMS_HOST_TEST mock for the STM32 HAL does not simulate NBTP —
-    // can0_init() is a no-op and can_test_ctrl1() returns 0.
-    // Bit-timing is validated by hardware bring-up; host test only checks
-    // that the mock infrastructure is intact (ctrl1 accessible without crash).
+// test 1: frame com ID ≠ 0x180 não deve atualizar lambda nem limpar fault.
+// Valida defesa-em-profundidade no software: can_stack_rx() deve ignorar IDs
+// inesperados mesmo que o filtro hardware (SFEC/ANFS) falhe por regressão.
+void test_rx_ignores_non_wbo2_id() {
     ems::app::can_stack_test_reset();
-    const uint32_t ctrl1 = ems::hal::can_test_ctrl1();
-    // STM32 host mock: ctrl1 is always 0 (FDCAN NBTP not simulated in mock).
-    TEST_ASSERT_EQ_U32(0u, ctrl1);
+    const ems::drv::CkpSnapshot ckp     = make_ckp(5000u);
+    const ems::drv::SensorData  sensors = make_sensors();
+
+    // Injetar frame com ID=0x181 (não é o WBO2 0x180), dados plausíveis de λ
+    ems::hal::CanFrame intruder{};
+    intruder.id       = 0x181u;
+    intruder.dlc      = 3u;
+    intruder.extended = false;
+    intruder.data[0]  = 0xE8u;  // λ=1000 milli se fosse 0x180
+    intruder.data[1]  = 0x03u;
+    intruder.data[2]  = 0x01u;
+    TEST_ASSERT_TRUE(ems::hal::can_test_inject_rx(intruder));
+
+    // can_stack_process() consome a fila RX internamente
+    ems::app::can_stack_process(50u, ckp, sensors, 0, 0u, 0, 0u, 0u, 0x00u);
+
+    // Lambda deve permanecer no valor seguro e fault ativo — frame intruso ignorado
+    TEST_ASSERT_EQ_U32(ems::app::WBO2_SAFE_LAMBDA_MILLI,
+                       ems::app::can_stack_lambda_milli());
+    TEST_ASSERT_TRUE(ems::app::can_stack_wbo2_fault());
 }
 
 // ─── test 2: serialização 0x400 ──────────────────────────────────────────────
@@ -229,7 +244,7 @@ void test_status_bits_scheduler_flags_passthrough() {
 } // namespace
 
 int main() {
-    test_can_init_programs_bit_timing();
+    test_rx_ignores_non_wbo2_id();
     test_tx_0x400_serialization();
     test_tx_0x401_serialization();
     test_rx_wbo2_safe_lambda_and_timeout();

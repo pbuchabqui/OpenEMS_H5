@@ -492,6 +492,13 @@ uint8_t nvm_test_runtime_seed_slot_count() noexcept {
     return kTestSeedSlots;
 }
 
+void nvm_test_corrupt_calibration_crc(uint8_t page) noexcept {
+    if (page > 2u) { return; }
+    // CalHeader layout: [magic (4B) | crc32 (4B)] — flip bit 0 do campo crc32
+    // para simular corrupção por power-loss ou bit-flip em Flash.
+    g_cal[page][4] ^= 0x01u;  // byte 4 = LSB do campo crc32 em CalHeader
+}
+
 } // namespace ems::hal
 
 #endif  // EMS_HOST_TEST
