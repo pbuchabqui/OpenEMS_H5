@@ -20,8 +20,8 @@
 
 #ifndef EMS_HOST_TEST
 
-#include "hal/system.h"
-#include "hal/regs.h"
+#include "hal/stm32h562/system.h"
+#include "hal/stm32h562/regs.h"
 
 // ── Variável global de contagem SysTick ─────────────────────────────────────
 static volatile uint32_t g_systick_ms = 0u;
@@ -135,7 +135,7 @@ void system_stm32_init(void) noexcept {
 
 #else  // EMS_HOST_TEST
 
-#include "hal/system.h"
+#include "hal/stm32h562/system.h"
 #include <cstdint>
 static uint32_t g_mock_ms = 0u;
 void system_stm32_init(void) noexcept { }

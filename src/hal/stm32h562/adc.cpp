@@ -34,13 +34,13 @@
 #ifndef EMS_HOST_TEST
 
 #include "hal/adc.h"
-#include "hal/regs.h"
+#include "hal/stm32h562/regs.h"
 
 // ── Cache das últimas leituras ADC ───────────────────────────────────────────
 static volatile uint16_t g_adc1_raw[8] = {};  // canais ADC1 IN3-IN10
 static volatile uint16_t g_adc2_raw[4] = {};  // canais ADC2 IN1-IN4
 
-// Índice de canal para ISR com EOC por conversão
+// ── Índices para acumulação EOC-driven (um por canal por ISR) ─────────────────
 static volatile uint8_t g_adc1_idx = 0u;
 static volatile uint8_t g_adc2_idx = 0u;
 
@@ -195,15 +195,15 @@ void adc_init() noexcept {
     TIM6_EGR = 1u;
     TIM6_CR1 = TIM_CR1_CEN | TIM_CR1_URS;  // URS: apenas overflow gera TRGO
 
-    // ── 7. Habilitar interrupções EOC + EOS e NVIC ───────────────────────
-    // Sem IER configurado, o ISR nunca dispara mesmo com NVIC habilitado.
+    // ── 7. Habilitar interrupções EOC+EOS e NVIC ─────────────────────────
+    // EOC dispara 1× por canal convertido; EOS dispara ao fim da sequência.
     ADC1_IER = ADC_IER_EOCIE | ADC_IER_EOSIE;
     ADC2_IER = ADC_IER_EOCIE | ADC_IER_EOSIE;
-    // IRQ_ADC1 = 37 (shared ADC1+ADC2); prioridade 5 (equivalente ao ADC0 Kinetis)
+    // IRQ_ADC1=37 cobre ambos ADC1 e ADC2 (prioridade 5 = mesmo que Kinetis ADC0)
     nvic_set_priority(IRQ_ADC1, 5u);
     nvic_enable_irq(IRQ_ADC1);
 
-    // ── 8. Primeira conversão para popular o cache ───────────────────────
+    // ── 8. Disparar primeira conversão para popular o cache ──────────────
     ADC1_CR |= ADC_CR_ADSTART;
     ADC2_CR |= ADC_CR_ADSTART;
 }
@@ -236,14 +236,14 @@ uint16_t adc1_read(Adc1Channel ch) noexcept {
 
 } // namespace ems::hal
 
-// ── ISR ADC — processa resultado das conversões sequenciais ──────────────────
-// EOC dispara uma vez por canal convertido; leitura de ADC_DR limpa EOC (RM0481 §25.6.3).
-// EOS dispara após o último canal da sequência.
+// ── ISR ADC — acumula resultados canal a canal via EOC ───────────────────────
+// EOC dispara 1× por canal em scan mode; leitura de ADC_DR limpa EOC automaticamente.
+// EOS dispara ao fim da sequência completa → reinicia índice e re-arma.
 extern "C" void ADC1_2_IRQHandler(void) {
     const uint32_t sr1 = ems::hal::ADC1_ISR;
     const uint32_t sr2 = ems::hal::ADC2_ISR;
 
-    // ADC1: acumula 1 canal por EOC (8 canais no total)
+    // ADC1: acumula 1 canal por EOC (8 canais: IN3-IN10)
     if (sr1 & ems::hal::ADC_ISR_EOC) {
         if (g_adc1_idx < 8u) {
             g_adc1_raw[g_adc1_idx++] =
@@ -252,11 +252,11 @@ extern "C" void ADC1_2_IRQHandler(void) {
     }
     if (sr1 & ems::hal::ADC_ISR_EOS) {
         g_adc1_idx = 0u;
-        ems::hal::ADC1_ISR = ems::hal::ADC_ISR_EOS;   // W1C: limpa EOS
-        ems::hal::ADC1_CR |= ems::hal::ADC_CR_ADSTART;  // re-arm
+        ems::hal::ADC1_ISR = ems::hal::ADC_ISR_EOS;   // limpa EOS (W0C)
+        ems::hal::ADC1_CR |= ems::hal::ADC_CR_ADSTART; // re-arm sequência
     }
 
-    // ADC2: acumula 1 canal por EOC (4 canais no total)
+    // ADC2: acumula 1 canal por EOC (4 canais: IN1, IN2, IN13, IN14)
     if (sr2 & ems::hal::ADC_ISR_EOC) {
         if (g_adc2_idx < 4u) {
             g_adc2_raw[g_adc2_idx++] =
