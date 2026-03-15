@@ -88,7 +88,8 @@ LDFLAGS := \
     -Wl,--gc-sections \
     -Wl,-Map=$(MAP) \
     -Wl,--print-memory-usage \
-    -nostartfiles
+    -nostartfiles \
+    --specs=nosys.specs
 
 # ── OpenOCD ───────────────────────────────────────────────────────────────────
 OPENOCD_CFG := scripts/openocd_stm32h562.cfg
