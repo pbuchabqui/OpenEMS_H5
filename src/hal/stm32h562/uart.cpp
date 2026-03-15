@@ -18,7 +18,7 @@
 #ifndef EMS_HOST_TEST
 
 #include "hal/uart.h"
-#include "hal/regs.h"
+#include "hal/stm32h562/regs.h"
 
 // ── Clock APB1 para cálculo BRR ───────────────────────────────────────────────
 static constexpr uint32_t kApb1ClockHz = 125000000u;  // 125 MHz
