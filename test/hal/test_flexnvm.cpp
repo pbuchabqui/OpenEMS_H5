@@ -288,14 +288,19 @@ void test_runtime_seed_ignores_invalid_latest_slot() {
 
 void test_runtime_seed_boot_compatibility_checks() {
     ems::hal::RuntimeSyncSeed seed{};
+    seed.magic = ems::hal::RUNTIME_SYNC_SEED_MAGIC;
+    seed.version = ems::hal::RUNTIME_SYNC_SEED_VERSION;
     seed.flags = ems::hal::RUNTIME_SYNC_SEED_FLAG_FULL_SYNC;
     seed.tooth_index = 12u;
     seed.decoder_tag = ems::hal::RUNTIME_SYNC_SEED_DECODER_TAG_60_2;
+    seed.crc32 = ems::hal::runtime_seed_crc32(seed);
     TEST_ASSERT_TRUE(ems::hal::runtime_seed_boot_compatible_60_2(seed));
 
+    // Wrong decoder_tag → fails before CRC check
     seed.decoder_tag = 0u;
     TEST_ASSERT_TRUE(!ems::hal::runtime_seed_boot_compatible_60_2(seed));
 
+    // Restore decoder_tag; tooth_index beyond max → fails tooth_index check
     seed.decoder_tag = ems::hal::RUNTIME_SYNC_SEED_DECODER_TAG_60_2;
     seed.tooth_index = 58u;
     TEST_ASSERT_TRUE(!ems::hal::runtime_seed_boot_compatible_60_2(seed));
@@ -303,13 +308,17 @@ void test_runtime_seed_boot_compatibility_checks() {
 
 void test_runtime_seed_fast_reacquire_requires_gap_alignment() {
     ems::hal::RuntimeSyncSeed seed{};
+    seed.magic = ems::hal::RUNTIME_SYNC_SEED_MAGIC;
+    seed.version = ems::hal::RUNTIME_SYNC_SEED_VERSION;
     seed.flags = ems::hal::RUNTIME_SYNC_SEED_FLAG_FULL_SYNC;
     seed.decoder_tag = ems::hal::RUNTIME_SYNC_SEED_DECODER_TAG_60_2;
 
     seed.tooth_index = 0u;
+    seed.crc32 = ems::hal::runtime_seed_crc32(seed);
     TEST_ASSERT_TRUE(ems::hal::runtime_seed_fast_reacquire_compatible_60_2(seed));
 
     seed.tooth_index = 7u;
+    seed.crc32 = ems::hal::runtime_seed_crc32(seed);  // valid CRC to reach tooth_index==0 check
     TEST_ASSERT_TRUE(!ems::hal::runtime_seed_fast_reacquire_compatible_60_2(seed));
 }
 

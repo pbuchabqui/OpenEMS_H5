@@ -109,18 +109,25 @@ void can0_init() noexcept {
         sram_word(i * 4u) = 0u;
     }
 
-    // Std ID Filter: aceitar 0x180 (WBO2 RX) — passar para RX FIFO0
-    // Elemento de filtro padrão: [31:30]=tipo, [28:16]=SFID1, [12:0]=SFID2
-    // Tipo 010 = Classic filter, SFID1=ID, SFID2=ID (exact match)
+    // Std ID Filter: aceitar APENAS 0x180 (WBO2 RX) — passar para RX FIFO0
+    // Elemento de filtro padrão: [31:30]=SFT, [29:27]=SFEC, [28:16]=SFID1, [12:0]=SFID2
+    // SFT=010 = Classic filter (exact match SFID1==ID, máscara SFID2)
+    // SFEC=001 = Store in RX FIFO0 se ID match
+    // FIX: SFEC era 000 (disabled) → todos os frames eram aceitos via ANFS=0
     sram_word(kSramStdFilters + 0u) =
         (0x2u << 30)       // SFT = 010 (classic filter)
-      | (0u << 27)         // SFEC = 000 (disable — aceitar para RX FIFO depois)
+      | (0x1u << 27)       // SFEC = 001 (store in RX FIFO0 se ID match) — era 000 (disabled)
       | (0x180u << 16)     // SFID1 = 0x180
-      | (0x180u << 0);     // SFID2 = 0x180
+      | (0x180u << 0);     // SFID2 = 0x180 (mask: exact match)
 
-    // Global filter: aceitar tudo no RX FIFO0 (simplificado — pode filtrar se necessário)
+    // Global filter: rejeitar frames não-matched (defense-in-depth)
+    // ANFS[5:4]=10 (rejeitar std IDs não-matched), ANFE[3:2]=10 (rejeitar ext IDs não-matched)
+    // LSE=1 (1 filtro Std ID configurado), LSS=0 (sem filtros Ext ID)
+    // FIX: ANFS era 00 (accept in FIFO0) → qualquer frame CAN entrava no FIFO
     FDCAN1_RXGFC = (0u << 8)   // LSS = 0 (sem filtros Ext ID)
-                 | (2u << 0);  // LSE = 2 (2 filtros Std ID)
+                 | (1u << 0)   // LSE = 1 (1 filtro Std ID)
+                 | (2u << 4)   // ANFS = 10 (rejeitar std IDs não-matched)
+                 | (2u << 2);  // ANFE = 10 (rejeitar ext IDs não-matched)
 
     // RX FIFO0: 3 elementos de 18 bytes cada
     FDCAN1_RXF0C = (kSramRxFifo0 / 4u)   // F0SA: start address em words

@@ -22,7 +22,7 @@ namespace {
 
 int g_tests_run = 0;
 int g_tests_failed = 0;
-uint16_t g_capture = 0u;
+uint32_t g_capture = 0u;
 
 #define TEST_ASSERT_TRUE(cond) do { \
     ++g_tests_run; \
@@ -53,14 +53,14 @@ void test_reset() {
     ECU_Hardware_Init();
 }
 
-void feed_tooth(uint16_t period_ticks) {
+void feed_tooth(uint32_t period_ticks) {
     ems_test_gpiod_pdir = (1u << 0u);
-    g_capture = static_cast<uint16_t>(g_capture + period_ticks);
+    g_capture += period_ticks;
     ems_test_ftm3_c0v = g_capture;
     ems::drv::ckp_ftm3_ch0_isr();
 }
 
-void feed_revolution_pattern(uint16_t tooth_ticks, uint16_t gap_ticks) {
+void feed_revolution_pattern(uint32_t tooth_ticks, uint32_t gap_ticks) {
     for (int i = 0; i < 58; ++i) {
         feed_tooth(tooth_ticks);
     }

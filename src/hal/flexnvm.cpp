@@ -27,6 +27,7 @@
 
 #include "hal/flexnvm.h"
 #include "hal/regs.h"
+#include "hal/system.h"  // micros() para timeout em flash_wait_ready()
 #include <cstring>
 
 // ── Buffers SRAM para LTFT e Knock maps ─────────────────────────────────────
@@ -49,6 +50,30 @@ static constexpr uint32_t kSectorSize  = FLASH_SECTOR_SIZE;
 static constexpr uint32_t kFlashKey1 = 0x45670123u;
 static constexpr uint32_t kFlashKey2 = 0xCDEF89ABu;
 
+// ── Cabeçalho de integridade para dados de calibração ────────────────────────
+// Prefixo de 8 bytes gravado antes de cada página de calibração na Flash.
+// Permite detectar dados corrompidos por power-loss durante escrita.
+// O setor tem 8 KB — o header de 8 bytes é negligível.
+struct CalHeader {
+    uint32_t magic;   // identificador fixo kCalMagic
+    uint32_t crc32;   // CRC-32 (ISO 3309) dos bytes de dados (sem o header)
+};
+static constexpr uint32_t kCalMagic  = 0xCA110E55u;  // "CALL EMS"
+static constexpr uint32_t kCalHdrSz  = static_cast<uint32_t>(sizeof(CalHeader));  // 8 bytes
+
+// CRC-32 sobre buffer arbitrário (mesmo polinômio que runtime_seed_crc32).
+static uint32_t crc32_buffer(const uint8_t* data, uint32_t len) noexcept {
+    uint32_t crc = 0xFFFFFFFFu;
+    for (uint32_t i = 0u; i < len; ++i) {
+        crc ^= data[i];
+        for (uint8_t b = 0u; b < 8u; ++b) {
+            const uint32_t mask = static_cast<uint32_t>(-(static_cast<int32_t>(crc & 1u)));
+            crc = (crc >> 1u) ^ (0xEDB88320u & mask);
+        }
+    }
+    return ~crc;
+}
+
 // ── Funções auxiliares ───────────────────────────────────────────────────────
 
 static void flash_unlock_bank2() noexcept {
@@ -62,19 +87,29 @@ static void flash_lock_bank2() noexcept {
     FLASH_CR2 |= FLASH_CR_LOCK;
 }
 
-static void flash_wait_ready() noexcept {
-    while (FLASH_SR2 & (FLASH_SR_BSY | FLASH_SR_WBNE | FLASH_SR_DBNE)) { }
+// FIX: versão anterior era void e loop infinito — se o Flash controller travar,
+// o IWDG não consegue resetar o sistema pois o main loop está bloqueado aqui.
+// Agora usa micros() com timeout de 50 ms e retorna false em caso de travamento.
+static bool flash_wait_ready() noexcept {
+    static constexpr uint32_t kFlashTimeoutUs = 50000u;  // 50 ms
+    const uint32_t deadline = micros() + kFlashTimeoutUs;
+    while (FLASH_SR2 & (FLASH_SR_BSY | FLASH_SR_WBNE | FLASH_SR_DBNE)) {
+        if (static_cast<int32_t>(micros() - deadline) > 0) {
+            return false;  // timeout — Flash controller travado
+        }
+    }
+    return true;
 }
 
 static bool flash_erase_sector(uint32_t sector_num) noexcept {
-    flash_wait_ready();
+    if (!flash_wait_ready()) { return false; }  // timeout antes de começar
     FLASH_CCR2 = 0xFFFFFFFFu;  // limpa todos os flags de erro
 
     FLASH_CR2 = FLASH_CR_SER
               | ((sector_num & 0xFu) << FLASH_CR_SNB_SHIFT)
               | FLASH_CR_STRT;
 
-    flash_wait_ready();
+    if (!flash_wait_ready()) { return false; }  // timeout durante apagamento
     FLASH_CR2 &= ~(FLASH_CR_SER | (0xFu << FLASH_CR_SNB_SHIFT));
 
     return (FLASH_SR2 & (FLASH_SR_PGSERR | FLASH_SR_WRPERR)) == 0u;
@@ -84,7 +119,7 @@ static bool flash_write_words(uint32_t dest_addr,
                               const uint8_t* src,
                               uint32_t len_bytes) noexcept {
     // len_bytes deve ser múltiplo de 4
-    flash_wait_ready();
+    if (!flash_wait_ready()) { return false; }  // timeout antes de começar
     FLASH_CR2 |= FLASH_CR_PG;
 
     const uint32_t* src32 = reinterpret_cast<const uint32_t*>(src);
@@ -93,7 +128,10 @@ static bool flash_write_words(uint32_t dest_addr,
 
     for (uint32_t i = 0u; i < nwords; ++i) {
         dst32[i] = src32[i];
-        flash_wait_ready();
+        if (!flash_wait_ready()) {        // timeout durante escrita de palavra
+            FLASH_CR2 &= ~FLASH_CR_PG;
+            return false;
+        }
         if (FLASH_SR2 & (FLASH_SR_PGSERR | FLASH_SR_WRPERR)) {
             FLASH_CR2 &= ~FLASH_CR_PG;
             return false;
@@ -151,12 +189,26 @@ bool nvm_save_calibration(uint8_t page, const uint8_t* data, uint16_t len) noexc
     const uint32_t sector = kSectorCal0 + page;
     const uint32_t dest   = kBank2Base + sector * kSectorSize;
 
-    // Arredondar len para múltiplo de 4
-    const uint32_t len32 = (static_cast<uint32_t>(len) + 3u) & ~3u;
+    // Montar buffer: [CalHeader (8 bytes) | dados | padding para múltiplo de 4]
+    // Usar sector_buf local estático (8 KB, em BSS — não na stack).
+    // FIX: versão anterior gravava dados sem magic/CRC — power-loss durante escrita
+    // retornava lixo silenciosamente. Agora detectável na leitura via CalHeader.
+    static uint8_t cal_write_buf[FLASH_SECTOR_SIZE] = {};
+    std::memset(cal_write_buf, 0xFFu, sizeof(cal_write_buf));
+
+    CalHeader hdr = {};
+    hdr.magic = kCalMagic;
+    hdr.crc32 = crc32_buffer(data, static_cast<uint32_t>(len));
+    std::memcpy(cal_write_buf, &hdr, kCalHdrSz);
+    std::memcpy(cal_write_buf + kCalHdrSz, data, len);
+
+    // Total a gravar: header + dados, arredondado para múltiplo de 4
+    const uint32_t total = kCalHdrSz + static_cast<uint32_t>(len);
+    const uint32_t total32 = (total + 3u) & ~3u;
 
     flash_unlock_bank2();
     const bool ok = flash_erase_sector(sector) &&
-                    flash_write_words(dest, data, len32);
+                    flash_write_words(dest, cal_write_buf, total32);
     flash_lock_bank2();
     return ok;
 }
@@ -167,8 +219,22 @@ bool nvm_load_calibration(uint8_t page, uint8_t* data, uint16_t len) noexcept {
     const uint32_t sector = kSectorCal0 + page;
     const uint32_t src    = kBank2Base + sector * kSectorSize;
 
-    // Leitura direta da Flash (mapeada em memória)
-    std::memcpy(data, reinterpret_cast<const void*>(src), len);
+    // Ler e validar o CalHeader antes de copiar dados para o buffer de destino.
+    // FIX: versão anterior copiava dados sem verificação — Flash corrompida era aceita.
+    CalHeader hdr = {};
+    std::memcpy(&hdr, reinterpret_cast<const void*>(src), kCalHdrSz);
+
+    if (hdr.magic != kCalMagic) {
+        return false;  // setor nunca foi gravado ou foi corrompido
+    }
+
+    const uint8_t* flash_data = reinterpret_cast<const uint8_t*>(src + kCalHdrSz);
+    const uint32_t computed_crc = crc32_buffer(flash_data, static_cast<uint32_t>(len));
+    if (computed_crc != hdr.crc32) {
+        return false;  // dados corrompidos (power-loss durante escrita)
+    }
+
+    std::memcpy(data, flash_data, len);
     return true;
 }
 
@@ -213,11 +279,19 @@ static constexpr uint32_t kSeedOffset = 512u;
 bool nvm_save_runtime_seed(const RuntimeSyncSeed* seed) noexcept {
     if (seed == nullptr) { return false; }
 
+    // FIX: versão anterior gravava o seed como recebido, sem preencher magic,
+    // version nem crc32 — campos ficavam com lixo se o chamador não os definisse.
+    // Agora sempre forçamos magic e version corretos e computamos o CRC antes de gravar.
+    RuntimeSyncSeed w = *seed;
+    w.magic   = RUNTIME_SYNC_SEED_MAGIC;
+    w.version = RUNTIME_SYNC_SEED_VERSION;
+    w.crc32   = runtime_seed_crc32(w);  // CRC de todos os campos exceto crc32
+
     static uint8_t sector_buf[FLASH_SECTOR_SIZE] = {};
     std::memcpy(sector_buf,
                 reinterpret_cast<const void*>(kBank2Base),
                 sizeof(sector_buf));
-    std::memcpy(sector_buf + kSeedOffset, seed, sizeof(RuntimeSyncSeed));
+    std::memcpy(sector_buf + kSeedOffset, &w, sizeof(RuntimeSyncSeed));
 
     flash_unlock_bank2();
     const bool ok = flash_erase_sector(kSectorLtft) &&
@@ -247,34 +321,36 @@ bool nvm_clear_runtime_seed() noexcept {
 #include "hal/runtime_seed.h"
 #include <cstring>
 
-// ── CRC-32 (ISO 3309 / Ethernet) ─────────────────────────────────────────────
-// Shared between host-test mock and production code.
-static uint32_t crc32_update(uint32_t crc, uint8_t data) noexcept {
-    crc ^= data;
-    for (uint8_t i = 0u; i < 8u; ++i) {
-        const uint32_t mask = static_cast<uint32_t>(-(static_cast<int32_t>(crc & 1u)));
-        crc = (crc >> 1u) ^ (0xEDB88320u & mask);
-    }
-    return crc;
-}
-
-static uint32_t runtime_seed_crc32(const ems::hal::RuntimeSyncSeed& seed) noexcept {
-    uint32_t crc = 0xFFFFFFFFu;
-    const uint8_t* p = reinterpret_cast<const uint8_t*>(&seed);
-    const uint16_t sz = static_cast<uint16_t>(sizeof(seed) - sizeof(seed.crc32));
-    for (uint16_t i = 0u; i < sz; ++i) {
-        crc = crc32_update(crc, p[i]);
-    }
-    return ~crc;
-}
+// runtime_seed_crc32() agora definida em hal/runtime_seed.h (inline, compartilhada).
+// Removida duplicata local que existia apenas no bloco EMS_HOST_TEST.
 
 namespace ems::hal {
 
 static constexpr uint8_t kTestSeedSlots = 8u;
+// CalHeader para mock: mesma struct que produção (replica comportamento real)
+struct CalHeader {
+    uint32_t magic;
+    uint32_t crc32;
+};
+static constexpr uint32_t kCalMagic = 0xCA110E55u;
+static constexpr uint32_t kCalHdrSz = static_cast<uint32_t>(sizeof(CalHeader));
+
+static uint32_t crc32_buffer(const uint8_t* data, uint32_t len) noexcept {
+    uint32_t crc = 0xFFFFFFFFu;
+    for (uint32_t i = 0u; i < len; ++i) {
+        crc ^= data[i];
+        for (uint8_t b = 0u; b < 8u; ++b) {
+            const uint32_t mask = static_cast<uint32_t>(-(static_cast<int32_t>(crc & 1u)));
+            crc = (crc >> 1u) ^ (0xEDB88320u & mask);
+        }
+    }
+    return ~crc;
+}
 
 static int8_t g_ltft[16][16] = {};
 static int8_t g_knock[8][8]  = {};
-static uint8_t g_cal[3][512]  = {};
+// g_cal: layout [CalHeader (8 bytes) | dados (512 bytes)] por página
+static uint8_t g_cal[3][520]  = {};
 static uint32_t g_erase_cnt   = 0u, g_prog_cnt = 0u;
 static bool     g_flash_busy      = false;  // simulates flash BSY timeout when set
 static uint32_t g_ccif_busy_polls = 0u;     // non-zero → simulate timeout on next op
@@ -307,11 +383,25 @@ bool nvm_save_calibration(uint8_t pg, const uint8_t* d, uint16_t l) noexcept {
     if (pg > 2u || d == nullptr || l == 0u) return false;
     if (g_flash_busy) { return false; }
     ++g_erase_cnt; ++g_prog_cnt;
-    std::memcpy(g_cal[pg], d, l); return true;
+    // Mock replica o comportamento de produção: [CalHeader | dados]
+    CalHeader hdr = {};
+    hdr.magic = kCalMagic;
+    hdr.crc32 = crc32_buffer(d, static_cast<uint32_t>(l));
+    std::memset(g_cal[pg], 0xFFu, sizeof(g_cal[pg]));
+    std::memcpy(g_cal[pg], &hdr, kCalHdrSz);
+    std::memcpy(g_cal[pg] + kCalHdrSz, d, l);
+    return true;
 }
 bool nvm_load_calibration(uint8_t pg, uint8_t* d, uint16_t l) noexcept {
     if (pg > 2u || d == nullptr || l == 0u) return false;
-    std::memcpy(d, g_cal[pg], l); return true;
+    // Verificar CalHeader antes de copiar (mesma lógica que produção)
+    CalHeader hdr = {};
+    std::memcpy(&hdr, g_cal[pg], kCalHdrSz);
+    if (hdr.magic != kCalMagic) { return false; }
+    const uint32_t computed = crc32_buffer(g_cal[pg] + kCalHdrSz, static_cast<uint32_t>(l));
+    if (computed != hdr.crc32) { return false; }
+    std::memcpy(d, g_cal[pg] + kCalHdrSz, l);
+    return true;
 }
 bool nvm_flush_adaptive_maps() noexcept { return true; }
 
@@ -333,10 +423,10 @@ bool nvm_save_runtime_seed(const RuntimeSyncSeed* s) noexcept {
         }
     }
     RuntimeSyncSeed w = *s;
-    w.magic   = RUNTIME_SYNC_SEED_MAGIC;
-    w.version = RUNTIME_SYNC_SEED_VERSION;
+    w.magic    = RUNTIME_SYNC_SEED_MAGIC;
+    w.version  = RUNTIME_SYNC_SEED_VERSION;
     w.sequence = found_any ? max_seq + 1u : 0u;
-    w.crc32 = runtime_seed_crc32(w);
+    w.crc32    = runtime_seed_crc32(w);  // usa função compartilhada de runtime_seed.h
     g_seed_slots[write_slot] = w;
     g_seed_slot_valid[write_slot] = true;
     return true;

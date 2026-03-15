@@ -53,7 +53,9 @@ enum class SyncState : uint8_t {
 struct CkpSnapshot {
     uint32_t tooth_period_ns;    ///< Período do último dente normal (ns); 0 antes de HALF_SYNC
     uint16_t tooth_index;        ///< Índice do dente (0–57) contado desde o último gap; válido em FULL_SYNC
-    uint16_t last_ftm3_capture;  ///< Timestamp FTM3 (ticks) do último dente — para angle-to-ticks
+    // FIX: uint16_t limitava a resolução a ~1ms @ 62.5 MHz (overflow em cranking < ~250 RPM).
+    // TIM5 é timer 32-bit — usar uint32_t preserva a resolução completa.
+    uint32_t last_ftm3_capture;  ///< Timestamp TIM5 (ticks, 32-bit) do último dente — para angle-to-ticks
     uint32_t rpm_x10;            ///< RPM × 10 (ex: 8000 = 800,0 RPM); 0 antes de dados suficientes
     SyncState state;             ///< Estado corrente da máquina de sincronismo
     bool phase_A;                ///< Fase do ciclo de 4 tempos — alterna a cada evento no cam sensor (CH1)
@@ -86,7 +88,8 @@ CkpSnapshot ckp_snapshot() noexcept;
  * Calculate_Sequential_Cycle). Reservada para uso futuro em saídas
  * CKP-síncronas (tach-out, came via FTM3 output-compare).
  */
-uint16_t ckp_angle_to_ticks(uint16_t angle_mdeg, uint16_t ref_capture) noexcept;
+// FIX: ref_capture e retorno atualizados para uint32_t (TIM5 é timer 32-bit).
+uint32_t ckp_angle_to_ticks(uint16_t angle_mdeg, uint32_t ref_capture) noexcept;
 
 // ── Hooks ─────────────────────────────────────────────────────────────────────
 // Chamados pela ISR de CKP a cada dente (símbolos fracos — sobrescreva para

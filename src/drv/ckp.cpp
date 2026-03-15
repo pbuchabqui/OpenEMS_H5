@@ -183,7 +183,9 @@ static constexpr uint8_t kHistSize = 3u;
 //   revisão cuidadosa das implicações de latência para as demais ISRs).
 struct DecoderState {
     ems::drv::CkpSnapshot snap;
-    uint16_t prev_capture;              // último timestamp FTM3_C0V (para delta circular)
+    // FIX: prev_capture uint16_t → uint32_t para aproveitar TIM5 como timer 32-bit.
+    // Delta aritmético ainda funciona por subtração unsigned sem sinal (wrap-around natural).
+    uint32_t prev_capture;              // último timestamp TIM5_CCR1 (para delta circular)
     uint32_t tooth_hist[kHistSize];     // janela deslizante de períodos (ticks) — dentes normais
     uint8_t  hist_ready;                // quantas entradas válidas em tooth_hist (máx kHistSize)
     uint16_t tooth_count;               // dentes desde o último gap aceito
@@ -220,13 +222,25 @@ static constexpr uint16_t kSeedCamConfirmMaxTeeth = 70u;
 //   65535 × 16667 = 1,092,534,045 < 2^32 (4,294,967,295) → seguro em uint32_t.
 // Margem restante: ~3× antes de overflow. Se o prescaler do FTM3 mudar para
 // valores maiores que 2, recalcular com o novo fator de conversão.
-inline uint32_t ticks_to_ns(uint16_t ticks) noexcept {
-    // Kinetis FTM3: 120 MHz / PS=2 = 60.0 MHz → 16.667 ns/tick → factor = 16667
-    // STM32H562 TIM5: 250 MHz / PS=4 = 62.5 MHz → 16.000 ns/tick → factor = 16000
-#if defined(TICKS_TO_NS_FACTOR)
-    return (static_cast<uint32_t>(ticks) * TICKS_TO_NS_FACTOR) / TICKS_TO_NS_DIVISOR;
+// FIX: parâmetro uint16_t → uint32_t para suportar deltas de timer 32-bit.
+// FIX: TICKS_TO_NS_FACTOR=16000, DIVISOR=1000 → razão exata de 16 ns/tick.
+//      Multiplicação direta por 16 evita overflow que ocorreria em cranking lento
+//      com (uint32_t_max_ticks * 16000) > 2^32.
+//      Para a Kinetis (FTM3 @ 60 MHz → 16.667 ns/tick): usa divisão com 64-bit.
+inline uint32_t ticks_to_ns(uint32_t ticks) noexcept {
+    // STM32H562 TIM5: 250 MHz / PS=4 = 62.5 MHz → 16.000 ns/tick
+    // factor/divisor = 16000/1000 = 16 exato — multiplicação direta é segura:
+    // max ticks razoável @ 1 RPM: ~37,500,000 ticks × 16 = 600,000,000 ns < 2^32 ✓
+#if defined(TICKS_TO_NS_FACTOR) && (TICKS_TO_NS_FACTOR == 16000u) && (TICKS_TO_NS_DIVISOR == 1000u)
+    return ticks * 16u;  // = ticks × (16000/1000) — simplificado para evitar overflow
+#elif defined(TICKS_TO_NS_FACTOR)
+    // Caso geral: usar 64-bit para evitar overflow na multiplicação
+    return static_cast<uint32_t>(
+        (static_cast<uint64_t>(ticks) * TICKS_TO_NS_FACTOR) / TICKS_TO_NS_DIVISOR);
 #else
-    return (static_cast<uint32_t>(ticks) * 16667u) / 1000u;
+    // Kinetis fallback: 16.667 ns/tick (60 MHz)
+    return static_cast<uint32_t>(
+        (static_cast<uint64_t>(ticks) * 16667u) / 1000u);
 #endif
 }
 
@@ -403,21 +417,22 @@ CkpSnapshot ckp_snapshot() noexcept {
     return out;
 }
 
-uint16_t ckp_angle_to_ticks(uint16_t angle_mdeg, uint16_t ref_capture) noexcept {
-    // RESERVADA: sem callers em produção. Domínio FTM3 (60 MHz/PS=2). Ver header.
-    // FTM3: 120 MHz / prescaler 2 = 60 MHz → 16,667 ns/tick
-    // tooth_period_ticks = tooth_period_ns × (60 ticks/µs) / 1000
-    // ticks_para_angulo  = (angle_mdeg × tooth_period_ticks) / kToothAngleX1000
+uint32_t ckp_angle_to_ticks(uint16_t angle_mdeg, uint32_t ref_capture) noexcept {
+    // RESERVADA: sem callers em produção. Domínio TIM5 (62.5 MHz). Ver header.
+    // TIM5: 250 MHz / prescaler 4 = 62.5 MHz → 16.0 ns/tick
+    // tooth_period_ticks = tooth_period_ns × 62.5 ticks/µs / 1000
+    //                    = tooth_period_ns / 16
     //
     // Verificação dimensional (angle_mdeg em miligraus, kToothAngleX1000 = 6000 mg/dente):
     //   Para 6° (1 dente): angle_mdeg = 6000 → ticks = 6000 × T / 6000 = T ✓
     //   Para 1°:           angle_mdeg = 1000 → ticks = 1000 × T / 6000 = T/6 ✓
     //
     // ATENÇÃO: não passar graus inteiros (ex: 6) — causará erro de 1000×.
-    const uint32_t tooth_period_ticks = (g_state.snap.tooth_period_ns * 60u) / 1000u;
+    // FIX: retorno e ref_capture atualizados para uint32_t (TIM5 é 32-bit).
+    const uint32_t tooth_period_ticks = g_state.snap.tooth_period_ns / 16u;  // ns → ticks @62.5MHz
     const uint32_t delta = (static_cast<uint32_t>(angle_mdeg) * tooth_period_ticks)
                            / kToothAngleX1000;
-    return static_cast<uint16_t>(ref_capture + static_cast<uint16_t>(delta));
+    return ref_capture + delta;  // wrap-around uint32_t correto para aritmética de ticks
 }
 
 // ── ISR do CKP: FTM3 Canal 0 (PTD0, rising edge) ─────────────────────────────
@@ -442,21 +457,25 @@ FASTRUN void ckp_ftm3_ch0_isr() noexcept {
     // O registrador de captura foi travado pelo HW no instante exato da borda;
     // leituras posteriores (GPIOD_PDIR, etc.) não afetam o valor capturado.
     // NÃO ler FTM3_CNT: o contador avançou durante a latência de IRQ.
-    const uint16_t capture_now = static_cast<uint16_t>(FTM3_C0V & 0xFFFFu);
+    //
+    // FIX: uint16_t → uint32_t para usar TIM5 como timer 32-bit completo.
+    // A truncagem para 16 bits causava wrap-around incorreto abaixo de ~250 RPM
+    // durante cranking (overflow de 16 bits @ 62.5 MHz ≈ 1,048 ms por tooth).
+    const uint32_t capture_now = FTM3_C0V;  // TIM5_CCR1: 32-bit timestamp travado pelo HW
 
-    // ── 2. Delta de ticks (aritmética circular uint16_t) ──────────────────
-    // Subtração circular: correto mesmo se o contador passou por 0xFFFF→0x0000
-    // durante o período do dente. Ex: 0x0005 - 0xFFFD = 0x0008 (delta = 8) ✓
-    const uint16_t delta_ticks = static_cast<uint16_t>(capture_now - g_state.prev_capture);
+    // ── 2. Delta de ticks (aritmética circular uint32_t) ──────────────────
+    // Subtração circular unsigned: correto mesmo com overflow do contador 32-bit.
+    // Ex: 0x00000005 - 0xFFFFFFFD = 0x00000008 (delta = 8) ✓
+    const uint32_t delta_ticks = capture_now - g_state.prev_capture;
 
     // ── 3. Anti-glitch por período mínimo ────────────────────────────────
-    // Estratégia preferida a checar GPIOD_PDIR depois da captura: a 120 MHz
+    // Estratégia preferida a checar GPIOD_PDIR depois da captura: a 62.5 MHz
     // o pino pode ter retornado LOW antes da CPU ler o registrador de GPIO,
     // descartando capturas legítimas em alta rotação (> 4000 RPM).
-    // Período mínimo aceitável: dente a 20000 RPM → 60 MHz / (58 * 20000/60)
-    //   = ~3103 ticks; usamos 50 como limite inferior conservador para
-    //   rejeitar glitches de EMC (< ~833 ns) sem afetar operação normal.
-    static constexpr uint16_t kMinToothTicks = 50u;
+    // Período mínimo aceitável: dente a 20000 RPM → 62.5 MHz / (58 * 20000/60)
+    //   ≈ 3228 ticks; usamos 50 como limite inferior conservador para
+    //   rejeitar glitches de EMC (< ~800 ns) sem afetar operação normal.
+    static constexpr uint32_t kMinToothTicks = 50u;
     if (delta_ticks < kMinToothTicks) {
         return;  // pulso muito curto → ruído EMC, descartar
     }

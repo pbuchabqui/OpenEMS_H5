@@ -528,6 +528,43 @@ static inline void gpio_set_analog(volatile uint32_t* moder, uint8_t pin) noexce
 #define FLASH_BANK2_BASE  0x08100000UL
 #define FLASH_SECTOR_SIZE 0x00002000UL  // 8 KB por setor no H562
 
+// ─── MPU (Memory Protection Unit — ARM Cortex-M33, Armv8-M) ─────────────────
+// STM32H562 implementa MPU com 8 regiões (Cortex-M33, Armv8-M.main).
+// Registradores base: 0xE000ED90 (ver ARMv8-M Architecture Reference Manual)
+#define MPU_TYPE     STM32_REG32(0xE000ED90u)  // MPU Type Register
+#define MPU_CTRL     STM32_REG32(0xE000ED94u)  // MPU Control Register
+#define MPU_RNR      STM32_REG32(0xE000ED98u)  // MPU Region Number Register
+#define MPU_RBAR     STM32_REG32(0xE000ED9Cu)  // MPU Region Base Address Register
+#define MPU_RLAR     STM32_REG32(0xE000EDA0u)  // MPU Region Limit Address Register
+#define MPU_MAIR0    STM32_REG32(0xE000EDC0u)  // MPU Memory Attribute Indirection Reg 0
+
+// MPU_CTRL bits
+#define MPU_CTRL_ENABLE      (1u << 0)  // MPU enable
+#define MPU_CTRL_HFNMIENA    (1u << 1)  // Enable MPU during HardFault/NMI/FAULTMASK
+#define MPU_CTRL_PRIVDEFENA  (1u << 2)  // Use default map for privileged code
+
+// MPU RBAR encoding (Cortex-M33 Armv8-M):
+//   [31:5] = Base address bits [31:5]
+//   [4:3]  = SH  (shareability: 00=non-shareable, 01=outer, 11=inner)
+//   [2:1]  = AP  (access: 00=no access, 01=RW priv, 10=RO priv, 11=RO any)
+//   [0]    = XN  (execute-never: 1 = execute not permitted)
+#define MPU_RBAR_AP_NO_ACCESS    (0u << 1)
+#define MPU_RBAR_AP_RW_PRIV      (1u << 1)
+#define MPU_RBAR_AP_RO_PRIV      (2u << 1)
+#define MPU_RBAR_XN              (1u << 0)
+
+// MPU RLAR encoding:
+//   [31:5] = Limit address bits [31:5]  (inclusive — last 32-byte block of region)
+//   [3:1]  = AttrIndx (memory attribute index 0-7, mapeado em MAIR0/MAIR1)
+//   [0]    = EN  (region enable)
+#define MPU_RLAR_EN              (1u << 0)
+#define MPU_RLAR_ATTR_NORMAL     (0u << 1)  // AttrIndx=0 → Normal memory (MAIR0 byte 0)
+#define MPU_RLAR_ATTR_DEVICE     (1u << 1)  // AttrIndx=1 → Device memory (MAIR0 byte 1)
+
+// Macro auxiliar: base e limit alinhados a 32 bytes
+#define MPU_RBAR_ADDR(addr)   (static_cast<uint32_t>(addr) & ~0x1Fu)
+#define MPU_RLAR_LIMIT(addr)  (static_cast<uint32_t>(addr) & ~0x1Fu)
+
 // ─── NVIC helpers (ARM Cortex-M33 NVIC — idêntico ao M4) ────────────────────
 #define NVIC_ISER_BASE  0xE000E100UL
 #define NVIC_IPR_BASE   0xE000E400UL

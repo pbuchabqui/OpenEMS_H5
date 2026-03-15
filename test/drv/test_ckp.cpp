@@ -13,7 +13,9 @@ namespace {
 
 int g_tests_run = 0;
 int g_tests_failed = 0;
-uint16_t g_capture = 0u;
+// FIX: uint16_t → uint32_t para simular TIM5 como timer 32-bit.
+// O ISR agora usa aritmética uint32_t; g_capture deve acumular sem overflow de 16 bits.
+uint32_t g_capture = 0u;
 
 #define TEST_ASSERT_TRUE(cond) do { \
     ++g_tests_run; \
@@ -38,9 +40,9 @@ void test_reset() {
     g_capture = 0u;
 }
 
-void feed_ckp(uint16_t period_ticks) {
+void feed_ckp(uint32_t period_ticks) {
     ems_test_gpiod_pdir = (1u << 0u);
-    g_capture = static_cast<uint16_t>(g_capture + period_ticks);
+    g_capture += period_ticks;  // acumulação uint32_t sem overflow artificial
     ems_test_ftm3_c0v = g_capture;
     ems::drv::ckp_ftm3_ch0_isr();
 }
@@ -98,17 +100,17 @@ void test_rpm_formula() {
 void test_circular_subtraction() {
     test_reset();
     ems_test_gpiod_pdir = (1u << 0u);
-    // Wrap test: de 65500 para 64 = delta de 100 ticks (> kMinToothTicks=50).
-    // (uint16_t)(64 - 65500) = (64 + 65536 - 65500) = 100 ✓
-    // Testa que a aritmética circular uint16_t funciona correctamente no wrap.
-    ems_test_ftm3_c0v = 65500u;
-    ems::drv::ckp_ftm3_ch0_isr();
+    // Wrap test (32-bit): 0x00000000 - 0xFFFFFF9C = 100 ticks (unsigned wrap).
+    // (uint32_t)(0 - 0xFFFFFF9C) = 100 ✓  (0xFFFFFF9C = UINT32_MAX - 99)
+    // Testa aritmética circular uint32_t no wrap natural do timer TIM5 32-bit.
+    ems_test_ftm3_c0v = 0xFFFFFF9Cu;
+    ems::drv::ckp_ftm3_ch0_isr();  // delta = 0xFFFFFF9C (from 0, bootstrap accepted)
 
-    ems_test_ftm3_c0v = 64u;
-    ems::drv::ckp_ftm3_ch0_isr();
+    ems_test_ftm3_c0v = 0u;
+    ems::drv::ckp_ftm3_ch0_isr();  // delta = (uint32_t)(0 - 0xFFFFFF9C) = 100 ticks
 
     const auto snap = ems::drv::ckp_snapshot();
-    // STM32H562 TIM5 @ 62.5 MHz → 16000 ns per 1000 ticks (16 ns/tick)
+    // 100 ticks × 16 ns/tick = 1600 ns
     TEST_ASSERT_EQ_U32((100u * 16000u) / 1000u, snap.tooth_period_ns);
 }
 
