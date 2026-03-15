@@ -127,6 +127,10 @@ SECTIONS
         __bss_end__ = _ebss;
     } > SRAM1
 
+    /* Símbolo 'end' necessário para _sbrk (newlib heap allocation) */
+    PROVIDE(end = _ebss);
+    PROVIDE(_end = _ebss);
+
     /* ── Heap (alocação dinâmica — pouco usada neste firmware) ─────────── */
     ._user_heap_stack :
     {
