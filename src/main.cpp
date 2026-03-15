@@ -294,8 +294,6 @@ int main() {
         if (elapsed(now, g_t20ms_, 20u)) {
             g_t20ms_ = now;
             ts_service();
-            const auto sensors = ems::drv::sensors_get();
-            const auto snap    = ems::drv::ckp_snapshot();
             ems::engine::auxiliaries_tick_20ms();
         }
 

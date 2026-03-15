@@ -227,6 +227,7 @@ static inline void gpio_set_analog(volatile uint32_t* moder, uint8_t pin) noexce
 #define TIM_CCMR1_OC1M_ACTIVE  (1u << 4)
 #define TIM_CCMR1_OC1M_INACTIVE (2u << 4)
 #define TIM_CCMR1_OC1M_PWM1    (6u << 4)
+#define TIM_CCMR1_OC2M_FROZEN  (0u << 12)
 #define TIM_CCMR1_OC2M_PWM1    (6u << 12)
 #define TIM_CCMR1_OC1PE        (1u << 3)   // preload enable CH1
 #define TIM_CCMR1_OC2PE        (1u << 11)
