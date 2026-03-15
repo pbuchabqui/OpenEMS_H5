@@ -322,6 +322,47 @@ void test_runtime_seed_fast_reacquire_requires_gap_alignment() {
     TEST_ASSERT_TRUE(!ems::hal::runtime_seed_fast_reacquire_compatible_60_2(seed));
 }
 
+// Verifica que runtime_seed_boot_compatible_60_2() rejeita seed com CRC corrompido.
+// test_runtime_seed_boot_compatibility_checks() testa decoder_tag e tooth_index mas
+// nunca passa crc32 errado — esta função cobre o caminho de rejeição por CRC.
+void test_runtime_seed_boot_compat_rejects_bad_crc() {
+    ems::hal::RuntimeSyncSeed seed{};
+    seed.magic       = ems::hal::RUNTIME_SYNC_SEED_MAGIC;
+    seed.version     = ems::hal::RUNTIME_SYNC_SEED_VERSION;
+    seed.flags       = ems::hal::RUNTIME_SYNC_SEED_FLAG_FULL_SYNC;
+    seed.tooth_index = 12u;
+    seed.decoder_tag = ems::hal::RUNTIME_SYNC_SEED_DECODER_TAG_60_2;
+    seed.crc32       = ems::hal::runtime_seed_crc32(seed);
+
+    // Baseline: seed válida deve passar
+    TEST_ASSERT_TRUE(ems::hal::runtime_seed_boot_compatible_60_2(seed));
+
+    // Corromper CRC — deve rejeitar mesmo com todos os outros campos corretos
+    seed.crc32 ^= 0xDEADBEEFu;
+    TEST_ASSERT_TRUE(!ems::hal::runtime_seed_boot_compatible_60_2(seed));
+}
+
+// Verifica que nvm_load_calibration() retorna false quando o CalHeader armazenado
+// tem CRC corrompido (simula power-loss ou bit-flip em Flash após gravação).
+void test_load_calibration_rejects_corrupted_sector() {
+    test_reset();
+    uint8_t src[16] = {1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16};
+    TEST_ASSERT_TRUE(ems::hal::nvm_save_calibration(0u, src, sizeof(src)));
+
+    // Sanidade: load antes da corrupção deve funcionar
+    uint8_t dst[16] = {};
+    TEST_ASSERT_TRUE(ems::hal::nvm_load_calibration(0u, dst, sizeof(dst)));
+    TEST_ASSERT_TRUE(dst[0] == 1u);
+
+    // Corromper CRC no CalHeader (bit-flip no byte 4 do setor)
+    ems::hal::nvm_test_corrupt_calibration_crc(0u);
+
+    // Load deve falhar e não modificar o buffer de destino
+    uint8_t dst2[16] = {};
+    TEST_ASSERT_TRUE(!ems::hal::nvm_load_calibration(0u, dst2, sizeof(dst2)));
+    TEST_ASSERT_TRUE(dst2[0] == 0u);
+}
+
 }  // namespace
 
 int main() {
@@ -345,6 +386,8 @@ int main() {
     test_runtime_seed_ignores_invalid_latest_slot();
     test_runtime_seed_boot_compatibility_checks();
     test_runtime_seed_fast_reacquire_requires_gap_alignment();
+    test_runtime_seed_boot_compat_rejects_bad_crc();
+    test_load_calibration_rejects_corrupted_sector();
 
     std::printf("tests=%d failed=%d\n", g_tests_run, g_tests_failed);
     return (g_tests_failed == 0) ? 0 : 1;

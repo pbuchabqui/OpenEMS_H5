@@ -21,6 +21,9 @@ void nvm_test_reset() noexcept;
 void nvm_test_set_ccif_busy_polls(uint32_t polls) noexcept;
 uint32_t nvm_test_erase_count() noexcept;
 uint32_t nvm_test_program_count() noexcept;
+// Corrompe o CRC armazenado no CalHeader da página indicada (simula bit-flip em Flash).
+// Permite testar que nvm_load_calibration() rejeita dados corrompidos.
+void nvm_test_corrupt_calibration_crc(uint8_t page) noexcept;
 #endif
 
 }  // namespace ems::hal
