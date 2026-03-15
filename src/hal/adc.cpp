@@ -89,6 +89,8 @@ static constexpr uint32_t kAdc2Sqr1 = (3u << 0)    // L = 3 (4 conv)
 
 namespace ems::hal {
 
+static constexpr uint32_t kTimClockHz = 250'000'000u;  // APB1 timer clock = HCLK @ 250 MHz
+
 // ── Funções auxiliares ───────────────────────────────────────────────────────
 
 static void adc_wait_ready(volatile uint32_t& isr) noexcept {
@@ -240,33 +242,33 @@ uint16_t adc1_read(Adc1Channel ch) noexcept {
 // EOC dispara uma vez por canal convertido; leitura de ADC_DR limpa EOC (RM0481 §25.6.3).
 // EOS dispara após o último canal da sequência.
 extern "C" void ADC1_2_IRQHandler(void) {
-    const uint32_t sr1 = ems::hal::ADC1_ISR;
-    const uint32_t sr2 = ems::hal::ADC2_ISR;
+    const uint32_t sr1 = ADC1_ISR;
+    const uint32_t sr2 = ADC2_ISR;
 
     // ADC1: acumula 1 canal por EOC (8 canais no total)
-    if (sr1 & ems::hal::ADC_ISR_EOC) {
+    if (sr1 & ADC_ISR_EOC) {
         if (g_adc1_idx < 8u) {
             g_adc1_raw[g_adc1_idx++] =
-                static_cast<uint16_t>(ems::hal::ADC1_DR & 0xFFFu);  // leitura limpa EOC
+                static_cast<uint16_t>(ADC1_DR & 0xFFFu);  // leitura limpa EOC
         }
     }
-    if (sr1 & ems::hal::ADC_ISR_EOS) {
+    if (sr1 & ADC_ISR_EOS) {
         g_adc1_idx = 0u;
-        ems::hal::ADC1_ISR = ems::hal::ADC_ISR_EOS;   // W1C: limpa EOS
-        ems::hal::ADC1_CR |= ems::hal::ADC_CR_ADSTART;  // re-arm
+        ADC1_ISR = ADC_ISR_EOS;   // W1C: limpa EOS
+        ADC1_CR |= ADC_CR_ADSTART;  // re-arm
     }
 
     // ADC2: acumula 1 canal por EOC (4 canais no total)
-    if (sr2 & ems::hal::ADC_ISR_EOC) {
+    if (sr2 & ADC_ISR_EOC) {
         if (g_adc2_idx < 4u) {
             g_adc2_raw[g_adc2_idx++] =
-                static_cast<uint16_t>(ems::hal::ADC2_DR & 0xFFFu);
+                static_cast<uint16_t>(ADC2_DR & 0xFFFu);
         }
     }
-    if (sr2 & ems::hal::ADC_ISR_EOS) {
+    if (sr2 & ADC_ISR_EOS) {
         g_adc2_idx = 0u;
-        ems::hal::ADC2_ISR = ems::hal::ADC_ISR_EOS;
-        ems::hal::ADC2_CR |= ems::hal::ADC_CR_ADSTART;
+        ADC2_ISR = ADC_ISR_EOS;
+        ADC2_CR |= ADC_CR_ADSTART;
     }
 }
 
