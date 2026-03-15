@@ -11,7 +11,7 @@
 //   - millis() provido por SysTick_Handler em system.cpp
 //   - pit1_kick() → iwdg_kick() (IWDG em vez de PIT1)
 //   - PIT0 (timestamp µs) → SysTick no system.cpp
-//   - NVIC setup usa IRQs do STM32H562 (IRQ_TIM5=50, IRQ_TIM1_CC=27)
+//   - NVIC setup usa IRQs do STM32H562 (IRQ_TIM5=48, IRQ_TIM1_CC=44) ← regs.h
 //   - Sem pit_init() — SysTick e IWDG já inicializados em system_stm32_init()
 //   - nvm_flush_adaptive_maps() no slot 500ms (Flash Bank2)
 // =============================================================================
