@@ -27,6 +27,7 @@
 
 #include "hal/flexnvm.h"
 #include "hal/regs.h"
+#include "hal/runtime_seed.h"
 #include "hal/system.h"  // micros() para timeout em flash_wait_ready()
 #include <cstring>
 
@@ -272,7 +273,6 @@ bool nvm_flush_adaptive_maps() noexcept {
 
 // ── RuntimeSyncSeed (boot rápido) ────────────────────────────────────────────
 // Armazena seed na região final do Setor 0 (bytes 512-543 = 32 bytes)
-#include "hal/runtime_seed.h"
 
 static constexpr uint32_t kSeedOffset = 512u;
 
