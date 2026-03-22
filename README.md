@@ -1,4 +1,9 @@
 # OpenEMS_H5
+
+![Platform](https://img.shields.io/badge/platform-STM32H5-blue)
+![Language](https://img.shields.io/badge/language-C++17-green)
+![Architecture](https://img.shields.io/badge/architecture-OpenEMS%20v2.2-orange)
+
 Firmware ECU para **STM32H562RGT6** seguindo a arquitetura **OpenEMS v2.2**.
 
 ---
@@ -38,13 +43,15 @@ GND     ──────  GND
 
 ## Como compilar
 
-### Passo 1 — Clonar o repositório
+### Opção 1: Make (Recomendado)
+
+#### Passo 1 — Clonar o repositório
 ```bash
 git clone https://github.com/pbuchabqui/OpenEMS_H5.git
 cd OpenEMS_H5
 ```
 
-### Passo 2 — Compilar o firmware
+#### Passo 2 — Compilar o firmware
 ```bash
 make
 ```
@@ -65,6 +72,21 @@ Ao final, o `make` exibe o uso de memória:
 ```
 - **text** = Flash utilizada (código + dados somente leitura)
 - **bss/data** = RAM utilizada
+
+### Opção 2: PlatformIO
+
+Se você já usa VS Code com PlatformIO:
+
+```bash
+# Compilar
+pio run
+
+# Gravar no MCU
+pio run -t upload
+
+# Monitor serial
+pio device monitor -b 115200
+```
 
 ---
 
@@ -93,6 +115,11 @@ Saída esperada:
 ** Resetting Target **
 ```
 
+### Gravação alternativa via script
+```bash
+./scripts/flash_stm32h562.sh
+```
+
 ---
 
 ## Outros comandos úteis
@@ -115,6 +142,43 @@ arm-none-eabi-gdb build/openems.elf \
     -ex "target remote :3333" \
     -ex "monitor reset halt"
 ```
+
+Comandos GDB úteis:
+```gdb
+break main              # Breakpoint no main
+continue                # Continuar execução
+print variable_name     # Imprimir variável
+info registers          # Mostrar registradores
+step                    # Passo a passo (dentro de funções)
+next                    # Próxima linha
+backtrace               # Mostrar call stack
+```
+
+---
+
+## TunerStudio
+
+O firmware suporta comunicação com TunerStudio para calibração e monitoramento em tempo real.
+
+### Configuração
+1. Abra o TunerStudio
+2. Crie um novo projeto: **File → New Project**
+3. Selecione **Custom / Other** como tipo
+4. Carregue o arquivo de definição: `tunerstudio/openems.ini`
+5. Configure a porta serial: `/dev/ttyACM0` (Linux) ou `COMx` (Windows)
+
+### Canais disponíveis
+| Canal | Descrição | Unidade |
+|-------|-----------|---------|
+| `rpm` | Rotação do motor | RPM |
+| `map_kpa` | Pressão do coletor | kPa |
+| `tps_pct` | Posição do acelerador | % |
+| `clt_c` | Temperatura do líquido de arrefecimento | °C |
+| `iat_c` | Temperatura do ar de admissão | °C |
+| `o2_mv` | Sonda Lambda | mV |
+| `advance` | Avanço de ignição | graus |
+| `ve_cell` | Eficiência volumétrica | % |
+| `status` | Bits de status | - |
 
 ---
 
@@ -148,32 +212,111 @@ O backend de produção de `USB CDC ACM` ainda precisa ser implementado sobre o 
 ```
 OpenEMS_H5/
 ├── Makefile                        # Build system
+├── platformio.ini                  # Configuração PlatformIO
 ├── scripts/
 │   ├── build_stm32h5.sh            # Script bash alternativo
-│   └── openocd_stm32h562.cfg       # Configuração OpenOCD
-└── src/
-    ├── main.cpp                    # Ponto de entrada
-    ├── hal/                        # Hardware Abstraction Layer
-    │   ├── system.cpp              # Clock PLL 250 MHz, SysTick, IWDG
-    │   ├── tim.cpp                 # TIM2/TIM5/TIM1/TIM8/TIM15/TIM3/TIM12
-    │   ├── adc.cpp                 # ADC1 + ADC2
-    │   ├── fdcan.cpp               # FDCAN1 (CAN FD)
-    │   ├── usb_cdc.cpp             # USB CDC ACM (target backend pendente)
-    │   ├── cordic.cpp              # CORDIC hardware / referência host
-    │   ├── flash_nvm.cpp           # EEPROM emulada (Flash Bank2)
-    │   ├── regs.h                  # Registradores STM32H562
-    │   ├── startup_stm32h562.s     # Vetor de interrupções + Reset_Handler
-    │   └── stm32h562rgt6.ld        # Linker script
-    ├── drv/                        # Drivers de periféricos
-    │   ├── ckp.cpp                 # Sensor de posição do virabrequim
-    │   ├── scheduler.cpp           # Scheduler absoluto v2.2
-    │   └── sensors.cpp             # Processamento de sensores
-    ├── engine/                     # Lógica de controle do motor
-    │   ├── ecu_sched.cpp           # Scheduler angular existente
-    │   ├── fuel_calc.cpp           # Cálculo de injeção
-    │   ├── ign_calc.cpp            # Cálculo de ignição
-    │   └── ...
-    └── app/                        # Aplicação
-        ├── tuner_studio.cpp        # Protocolo TunerStudio
-        └── can_stack.cpp           # Stack de mensagens CAN
+│   ├── flash_stm32h562.sh          # Script de gravação
+│   ├── openocd_stm32h562.cfg       # Configuração OpenOCD
+│   └── run_host_tests.sh           # Script para rodar testes
+├── src/
+│   ├── main.cpp                    # Ponto de entrada
+│   ├── hal/                        # Hardware Abstraction Layer
+│   │   ├── system.cpp              # Clock PLL 250 MHz, SysTick, IWDG
+│   │   ├── tim.cpp                 # TIM2/TIM5/TIM1/TIM8/TIM15/TIM3/TIM12
+│   │   ├── adc.cpp                 # ADC1 + ADC2
+│   │   ├── fdcan.cpp               # FDCAN1 (CAN FD)
+│   │   ├── usb_cdc.cpp             # USB CDC ACM (target backend pendente)
+│   │   ├── cordic.cpp              # CORDIC hardware / referência host
+│   │   ├── flash_nvm.cpp           # EEPROM emulada (Flash Bank2)
+│   │   ├── regs.h                  # Registradores STM32H562
+│   │   ├── startup_stm32h562.s     # Vetor de interrupções + Reset_Handler
+│   │   └── stm32h562rgt6.ld        # Linker script
+│   ├── drv/                        # Drivers de periféricos
+│   │   ├── ckp.cpp                 # Sensor de posição do virabrequim
+│   │   ├── scheduler.cpp           # Scheduler absoluto v2.2
+│   │   └── sensors.cpp             # Processamento de sensores
+│   ├── engine/                     # Lógica de controle do motor
+│   │   ├── cycle_sched.cpp         # Scheduler angular existente
+│   │   ├── fuel_calc.cpp           # Cálculo de injeção
+│   │   ├── ign_calc.cpp            # Cálculo de ignição
+│   │   ├── knock.cpp               # Detecção de knock
+│   │   ├── quick_crank.cpp         # Quick crank para partida rápida
+│   │   ├── table3d.cpp             # Tabelas 3D para calibração
+│   │   └── auxiliaries.cpp         # Controle de auxiliares (IACV, VVT, etc.)
+│   └── app/                        # Aplicação
+│       ├── tuner_studio.cpp        # Protocolo TunerStudio
+│       └── can_stack.cpp           # Stack de mensagens CAN
+├── test/                           # Testes unitários
+│   ├── app/
+│   │   ├── test_can.cpp
+│   │   └── test_ts_protocol.cpp
+│   ├── drv/
+│   │   ├── test_ckp.cpp
+│   │   ├── test_scheduler.cpp
+│   │   ├── test_sensors.cpp
+│   │   └── test_sensors_validation.cpp
+│   ├── engine/
+│   │   ├── test_auxiliaries.cpp
+│   │   ├── test_fuel.cpp
+│   │   ├── test_iacv.cpp
+│   │   ├── test_ign.cpp
+│   │   ├── test_knock.cpp
+│   │   └── test_quick_crank.cpp
+│   └── hal/
+│       ├── test_cordic.cpp
+│       ├── test_flash_nvm.cpp
+│       ├── test_tim_32bit.cpp
+│       └── test_usb_cdc.cpp
+└── tunerstudio/
+    └── openems.ini                 # Definição TunerStudio
 ```
+
+---
+
+## Testes
+
+O projeto inclui testes unitários para validação das funcionalidades.
+
+### Rodar testes no host (sem hardware)
+```bash
+./scripts/run_host_tests.sh
+```
+
+Os testes cobrem:
+- **App**: Protocolo CAN e TunerStudio
+- **Drivers**: CKP, Scheduler, Validação de sensores
+- **Engine**: Cálculos de combustível, ignição, knock, auxiliares
+- **HAL**: CORDIC, Flash NVM, TIM 32-bit, USB CDC
+
+---
+
+## Contribuição
+
+Contribuições são bem-vindas! Para contribuir:
+
+1. Fork o repositório
+2. Crie uma branch para sua feature: `git checkout -b feature/nova-feature`
+3. Commit suas mudanças: `git commit -m 'Add nova feature'`
+4. Push para a branch: `git push origin feature/nova-feature`
+5. Abra um Pull Request
+
+### Padrões de código
+- C++17 padrão
+- Sem exceptions (`-fno-exceptions`)
+- Sem RTTI (`-fno-rtti`)
+- Warnings habilitados (`-Wall -Wextra`)
+
+---
+
+## Licença
+
+Este projeto é de código aberto. Consulte o repositório para informações sobre licenciamento.
+
+---
+
+## Links úteis
+
+- [STM32H562RG Datasheet](https://www.st.com/resource/en/datasheet/stm32h562rg.pdf)
+- [STM32H5 Reference Manual](https://www.st.com/resource/en/reference_manual/rm0481-stm32h5-series-armbased-32bit-mcus-stmicroelectronics.pdf)
+- [OpenOCD Documentation](https://openocd.org/doc/html/index.html)
+- [PlatformIO Documentation](https://docs.platformio.org/)
