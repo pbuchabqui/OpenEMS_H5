@@ -3,31 +3,31 @@
  * @brief Módulo 1 (DECODE) + Módulo 2 (SYNC) — Engine Position Core — OpenEMS
  *
  * ═══════════════════════════════════════════════════════════════════════════
- * MÓDULO 1: DECODE via FTM Input Capture (Crank)
+ * MÓDULO 1: DECODE via timer input capture (Crank)
  * ───────────────────────────────────────────────
- *   Hardware: FTM3 Canal 0 (PTD0), rising edge capture.
- *             Em targets embarcados o FTM3 é mapeado via hal/ftm.cpp.
- *             Em host tests, FTM3_C0V é um volatile mock.
+ *   Hardware: input capture do timer de crank.
+ *             Em targets embarcados o caminho é mapeado via hal/tim.cpp.
+ *             Em host tests, o registrador de captura é um volatile mock.
  *
- *   Fluxo da ISR (ckp_ftm3_ch0_isr):
- *     1. Verificação anti-glitch: pino PTD0 ainda HIGH? (não é noise falling edge)
- *     2. Leitura de FTM3_C0V (registrador de captura — travado pelo HW)
- *        ► NÃO lemos FTM3_CNT: o contador avançou enquanto a CPU atendia a IRQ.
- *          FTM3_C0V contém o timestamp EXATO da borda de subida (RusEFI #1488).
- *     3. delta_ticks = (uint16_t)(capture_now - prev_capture)  ← aritmética circular
- *        Correto mesmo em overflow do contador de 16 bits (≈1,09 ms @ 60 MHz).
- *     4. Conversão para nanossegundos: period_ns = (delta_ticks × 16667) / 1000
- *        FTM3: 120 MHz / prescaler 2 = 60 MHz → 16,667 ns/tick
+ *   Fluxo da ISR (ckp_capture_primary_isr):
+ *     1. Verificação anti-glitch: pino PA0 ainda HIGH? (não é noise falling edge)
+ *     2. Leitura do registrador de captura travado pelo HW.
+ *        ► NÃO lemos o contador livre: ele avançou enquanto a CPU atendia a IRQ.
+ *          O registrador de captura contém o timestamp EXATO da borda.
+ *     3. delta_ticks = (uint32_t)(capture_now - prev_capture)  ← aritmética circular
+ *        Correto no TIM2 32-bit sem ISR de overflow.
+ *     4. Conversão auxiliar para nanossegundos: period_ns = delta_ticks × 4
+ *        Captura CKP: TIM2 @ 250 MHz, PSC=0 → 4 ns/tick
  *     5. Cálculo de médias → classificação: GAP | NORMAL_TOOTH | NOISE
  *     6. Atualização da máquina de estados (Módulo 2)
  *     7. Disparo dos hooks sensors_on_tooth() / schedule_on_tooth()
  *
  * VANTAGEM DO INPUT CAPTURE vs GPIO/EXTI:
- *   O periférico FTM registra o timestamp da borda em hardware no exato
+ *   O periférico de captura registra o timestamp da borda em hardware no exato
  *   instante do evento, independente do atraso de atendimento da IRQ
  *   (tipicamente 12–20 ciclos = 0,1–0,17 µs @ 120 MHz no Cortex-M4).
  *   A 6000 RPM, 0,2 µs de jitter ≈ 0,07° — inaceitável sem input capture.
- *   Com input capture: resolução = 1 tick = 16,67 ns ≈ 0,006° @ 6000 RPM.
+ *   Com input capture: resolução = 1 tick = 4 ns ≈ 0,0015° @ 6000 RPM.
  *
  * ═══════════════════════════════════════════════════════════════════════════
  * MÓDULO 2: SYNC — Máquina de Estados
@@ -36,20 +36,20 @@
  *   O gap ocorre 1× por revolução; a ISR identifica-o por razão de período.
  *
  *   Estados (enum SyncState — definido em ckp.h):
- *     WAIT_GAP     → inicial / pós-falha: aguarda qualquer gap
- *     HALF_SYNC    → 1º gap detectado; contando dentes para confirmar
- *     FULL_SYNC    → 2º gap na posição correta: tooth_index válido
+ *     WAIT         → inicial / pós-falha: aguarda qualquer gap
+ *     SYNCING      → 1º gap detectado; contando dentes para confirmar
+ *     SYNCED       → 2º gap na posição correta: tooth_index válido
  *     LOSS_OF_SYNC → gap ausente por >61 dentes, ou gap prematuro (<55 dentes)
  *
  *   Transições:
- *     WAIT_GAP     + gap              → HALF_SYNC   (tooth_count reset=0)
- *     HALF_SYNC    + gap, count≥55    → FULL_SYNC   (tooth_index reset=0)
- *     HALF_SYNC    + gap, count<55    → LOSS_OF_SYNC (pulso espúrio)
- *     HALF_SYNC    + count>61         → LOSS_OF_SYNC (gap ausente)
- *     FULL_SYNC    + gap, count≥55    → FULL_SYNC   (gap confirmado, reinicia)
- *     FULL_SYNC    + gap, count<55    → LOSS_OF_SYNC (wheel slip / ruído)
- *     FULL_SYNC    + count>61         → LOSS_OF_SYNC (gap ausente)
- *     LOSS_OF_SYNC + gap              → HALF_SYNC   (tentativa re-sync)
+ *     WAIT         + gap              → SYNCING   (tooth_count reset=0)
+ *     SYNCING      + gap, count≥55    → SYNCED    (tooth_index reset=0)
+ *     SYNCING      + gap, count<55    → LOSS_OF_SYNC (pulso espúrio)
+ *     SYNCING      + count>61         → LOSS_OF_SYNC (gap ausente)
+ *     SYNCED       + gap, count≥55    → SYNCED    (gap confirmado, reinicia)
+ *     SYNCED       + gap, count<55    → LOSS_OF_SYNC (wheel slip / ruído)
+ *     SYNCED       + count>61         → LOSS_OF_SYNC (gap ausente)
+ *     LOSS_OF_SYNC + gap              → SYNCING   (tentativa re-sync)
  *
  * FILTRO DINÂMICO ±20% (rejeição de ruído):
  *   Dentes normais aceitos apenas se:  0,8×avg ≤ period ≤ 1,2×avg
@@ -64,24 +64,18 @@
 
 #include <cstdint>
 
-#if __has_include("hal/ftm.h")
-#include "hal/ftm.h"
-#elif __has_include("ftm.h")
-#include "ftm.h"
-#endif
-
 // ── Remapeamento de registradores para STM32H562 ─────────────────────────────
-// FTM3_C0V → TIM5_CCR1 (0x40000C34), FTM3_C1V → TIM5_CCR2 (0x40000C38)
-// GPIOD_PDIR → GPIOA_IDR (0x42020010)
-// TIM5 @ 62.5 MHz (250 MHz / prescaler 4) → 16 ns/tick
-#define TICKS_TO_NS_FACTOR  16000u
+// Capture CH0 → TIM2_CCR1 (0x40000034), CH1 → TIM2_CCR2 (0x40000038)
+// GPIO input mirror → GPIOA_IDR (0x42020010)
+// TIM2 @ 250 MHz (PSC=0) → 4 ns/tick
+#define TICKS_TO_NS_FACTOR  4000u
 #define TICKS_TO_NS_DIVISOR 1000u
 
 // ── Mock de registradores para testes host ───────────────────────────────────
 #if defined(EMS_HOST_TEST)
-volatile uint32_t ems_test_ftm3_c0v  = 0u;
-volatile uint32_t ems_test_ftm3_c1v  = 0u;
-volatile uint32_t ems_test_gpiod_pdir = 0u;
+volatile uint32_t ems_test_ckp_capture_ch0 = 0u;
+volatile uint32_t ems_test_ckp_capture_ch1 = 0u;
+volatile uint32_t ems_test_ckp_gpio_idr = 0u;
 #endif
 
 // ── FIX-15: FASTRUN — coloca ISRs críticas em SRAM (zero cache miss) ─────────
@@ -144,33 +138,29 @@ static constexpr uint32_t kTolDenHigh = 5u;
 // 3 amostras são suficientes para filtrar ruído transitório.
 static constexpr uint8_t kHistSize = 3u;
 
-// ── Acesso a registradores FTM3 ──────────────────────────────────────────────
-// FTM3 Base: 0x400B9000 (K64P144M120SF5 RM, Table 3-1)
-// CnSC CH0:  base + 0x0C + 0*8 = 0x400B900C  (Status and Control — §43.3.5)
-// CnV  CH0:  base + 0x0C + 0*8 + 4 = 0x400B9010 (Channel Value — §43.3.6)
-//
-// CRÍTICO: Lemos FTM3_C0V (registrador de CAPTURA travado pelo hardware),
-//   não FTM3_CNT (contador livre que avançou durante o atendimento da ISR).
-//   Esta distinção elimina o jitter de software: o valor em C0V reflete o
+// ── Acesso a registradores de captura ────────────────────────────────────────
+// CRÍTICO: Lemos o registrador de CAPTURA travado pelo hardware,
+//   não o contador livre que avançou durante o atendimento da ISR.
+//   Esta distinção elimina o jitter de software: o valor capturado reflete o
 //   exato instante da borda de subida, independente da latência da IRQ.
 //   Referência: RusEFI issue #1488 ("timestamp corruption from CNT vs CnV").
 #if defined(EMS_HOST_TEST)
-#define FTM3_C0V      ems_test_ftm3_c0v
-#define FTM3_C1V      ems_test_ftm3_c1v
-#define GPIOD_PDIR    ems_test_gpiod_pdir
+#define CKP_CAPTURE_CH0      ems_test_ckp_capture_ch0
+#define CKP_CAPTURE_CH1      ems_test_ckp_capture_ch1
+#define CKP_GPIO_IDR         ems_test_ckp_gpio_idr
 #else
-// STM32H562: TIM5_CCR1 (TIM5 base 0x40000C00, CCR1 offset 0x34)
-#define FTM3_C0V      (*reinterpret_cast<volatile uint32_t*>(0x40000C34u))
-// STM32H562: TIM5_CCR2 (CCR2 offset 0x38)
-#define FTM3_C1V      (*reinterpret_cast<volatile uint32_t*>(0x40000C38u))
+// STM32H562: TIM2_CCR1 (TIM2 base 0x40000000, CCR1 offset 0x34)
+#define CKP_CAPTURE_CH0      (*reinterpret_cast<volatile uint32_t*>(0x40000034u))
+// STM32H562: TIM2_CCR2 (CCR2 offset 0x38)
+#define CKP_CAPTURE_CH1      (*reinterpret_cast<volatile uint32_t*>(0x40000038u))
 // GPIOA_IDR (GPIOA base 0x42020000, IDR offset 0x10) — verificação anti-glitch PA0
-#define GPIOD_PDIR    (*reinterpret_cast<volatile uint32_t*>(0x42020010u))
+#define CKP_GPIO_IDR         (*reinterpret_cast<volatile uint32_t*>(0x42020010u))
 #endif
 
 // ── Estado interno do decodificador ──────────────────────────────────────────
 //
 // INVARIANTE DE ACESSO — NUNCA VIOLAR:
-//   g_state é escrito EXCLUSIVAMENTE pela ISR ckp_ftm3_ch0_isr() (prioridade 1).
+//   g_state é escrito EXCLUSIVAMENTE pela ISR ckp_capture_primary_isr() (prioridade 1).
 //   Qualquer outro contexto (main loop, ISRs de prioridade < 1) DEVE usar
 //   ckp_snapshot() para ler g_state.snap — que aplica seção crítica CPSID/CPSIE.
 //
@@ -183,9 +173,8 @@ static constexpr uint8_t kHistSize = 3u;
 //   revisão cuidadosa das implicações de latência para as demais ISRs).
 struct DecoderState {
     ems::drv::CkpSnapshot snap;
-    // FIX: prev_capture uint16_t → uint32_t para aproveitar TIM5 como timer 32-bit.
-    // Delta aritmético ainda funciona por subtração unsigned sem sinal (wrap-around natural).
-    uint32_t prev_capture;              // último timestamp TIM5_CCR1 (para delta circular)
+    // TIM2 é 32-bit; o delta usa aritmética circular uint32_t diretamente.
+    uint32_t prev_capture;              // último timestamp TIM2_CCR1 (para delta circular)
     uint32_t tooth_hist[kHistSize];     // janela deslizante de períodos (ticks) — dentes normais
     uint8_t  hist_ready;                // quantas entradas válidas em tooth_hist (máx kHistSize)
     uint16_t tooth_count;               // dentes desde o último gap aceito
@@ -193,14 +182,14 @@ struct DecoderState {
 };
 
 static DecoderState g_state = {
-    ems::drv::CkpSnapshot{0u, 0u, 0u, 0u, ems::drv::SyncState::WAIT_GAP, false},
+    ems::drv::CkpSnapshot{0u, 0u, 0u, 0u, ems::drv::SyncState::WAIT, false},
     0u,
     {0u, 0u, 0u},
     0u,
     0u,
     0u,
 };
-// FIX-5: volatile nas variáveis escritas pela ISR FTM3 (prio 1) e lidas pelo
+// FIX-5: volatile nas variáveis escritas pela ISR de captura CKP (prio 1) e lidas pelo
 // background loop sem seção crítica. Sem volatile, o compilador pode elevar
 // as leituras para fora de loops ou cacheá-las em registradores, observando
 // valores desatualizados. volatile força um fresh load de memória a cada acesso.
@@ -215,44 +204,28 @@ static constexpr uint16_t kSeedCamConfirmMaxTeeth = 70u;
 
 // ── Utilitários inline ────────────────────────────────────────────────────────
 
-// Converte delta de ticks FTM3 para nanossegundos.
-// FTM3: 120 MHz / prescaler 2 = 60 MHz → 1 tick = 16,667 ns
-// Evita float: (ticks × 16667) / 1000  (equivalente exato a ticks × 16.667 ns)
-// Análise de overflow: max delta_ticks = 65535 (uint16_t)
-//   65535 × 16667 = 1,092,534,045 < 2^32 (4,294,967,295) → seguro em uint32_t.
-// Margem restante: ~3× antes de overflow. Se o prescaler do FTM3 mudar para
-// valores maiores que 2, recalcular com o novo fator de conversão.
-// FIX: parâmetro uint16_t → uint32_t para suportar deltas de timer 32-bit.
-// FIX: TICKS_TO_NS_FACTOR=16000, DIVISOR=1000 → razão exata de 16 ns/tick.
-//      Multiplicação direta por 16 evita overflow que ocorreria em cranking lento
-//      com (uint32_t_max_ticks * 16000) > 2^32.
-//      Para a Kinetis (FTM3 @ 60 MHz → 16.667 ns/tick): usa divisão com 64-bit.
+// Conversão auxiliar de ticks TIM2 para nanossegundos. O contrato principal v2.2
+// usa tooth_period_ticks; period_ns permanece apenas como derivado local.
 inline uint32_t ticks_to_ns(uint32_t ticks) noexcept {
-    // STM32H562 TIM5: 250 MHz / PS=4 = 62.5 MHz → 16.000 ns/tick
-    // factor/divisor = 16000/1000 = 16 exato — multiplicação direta é segura:
-    // max ticks razoável @ 1 RPM: ~37,500,000 ticks × 16 = 600,000,000 ns < 2^32 ✓
-#if defined(TICKS_TO_NS_FACTOR) && (TICKS_TO_NS_FACTOR == 16000u) && (TICKS_TO_NS_DIVISOR == 1000u)
-    return ticks * 16u;  // = ticks × (16000/1000) — simplificado para evitar overflow
+#if defined(TICKS_TO_NS_FACTOR) && (TICKS_TO_NS_FACTOR == 4000u) && (TICKS_TO_NS_DIVISOR == 1000u)
+    return ticks * 4u;
 #elif defined(TICKS_TO_NS_FACTOR)
-    // Caso geral: usar 64-bit para evitar overflow na multiplicação
     return static_cast<uint32_t>(
         (static_cast<uint64_t>(ticks) * TICKS_TO_NS_FACTOR) / TICKS_TO_NS_DIVISOR);
 #else
-    // Kinetis fallback: 16.667 ns/tick (60 MHz)
-    return static_cast<uint32_t>(
-        (static_cast<uint64_t>(ticks) * 16667u) / 1000u);
+    return ticks * 4u;
 #endif
 }
 
-// Calcula RPM × 10 a partir do período de um dente (nanossegundos).
-// Cada dente ocupa 6° = 1/60 de revolução (roda 60-2: 60 posições uniformes).
-// rpm × 10 = (60 s/min × 10⁹ ns/s × 10) / (60 × tooth_period_ns)
-//           = 600.000.000.000 / (60 × tooth_period_ns)
-//           = 10.000.000.000 / tooth_period_ns   ← pré-calculado para evitar mul 64-bit na ISR
-static constexpr uint64_t kRpmNumerator = 10000000000ULL;
-inline uint32_t rpm_x10_from_period_ns(uint32_t period_ns) noexcept {
-    if (period_ns == 0u) { return 0u; }
-    return static_cast<uint32_t>(kRpmNumerator / period_ns);
+// ⚡ CORREÇÃO C1/C7: Numerador correto da fórmula de RPM
+// Fonte: OpenEMS v2.2 Prompt 2, linha 29:
+//   rpm_x10 = (uint32_t)(1500000000000ULL / (58ULL * tooth_period_ticks))
+// Simplificação: 1500000000000 / 58 = 25862068.97 ≈ 25862068
+// O valor anterior (2500000000) estava ~96.7× maior que o correto.
+static constexpr uint64_t kRpmNumeratorTicks = 25862068ULL;
+inline uint32_t rpm_x10_from_period_ticks(uint32_t period_ticks) noexcept {
+    if (period_ticks == 0u) { return 0u; }
+    return static_cast<uint32_t>(kRpmNumeratorTicks / period_ticks);
 }
 
 // Insere novo período na janela deslizante (shift FIFO).
@@ -310,10 +283,10 @@ inline void exit_critical() noexcept {
 // ── Processamento de gap na máquina de estados ───────────────────────────────
 // Chamado pela ISR quando period > 1,5 × avg E tooth_count satisfaz a condição.
 // Retorna true se o gap foi aceito (transição válida).
-inline bool process_gap_event(uint16_t capture_now) noexcept {
+inline bool process_gap_event(uint32_t capture_now) noexcept {
     switch (g_state.snap.state) {
 
-        case ems::drv::SyncState::WAIT_GAP:
+        case ems::drv::SyncState::WAIT:
         case ems::drv::SyncState::LOSS_OF_SYNC:
             // Em qualquer estado de "não sincronizado", um gap inicia a tentativa de sync.
             //
@@ -323,7 +296,7 @@ inline bool process_gap_event(uint16_t capture_now) noexcept {
             // EMC que gere um período longo (aparentemente gap) sem que tenham passado
             // dentes suficientes não deve avançar o estado — seria uma sincronização falsa.
             //
-            // Excepção: no estado puro WAIT_GAP com histórico ainda não preenchido
+            // Excepção: no estado puro WAIT com histórico ainda não preenchido
             // (hist_ready < kHistSize), a ISR retorna antes de chegar aqui, portanto
             // qualquer gap que chegue a process_gap_event() já passou pelo filtro externo
             // ou é o primeiro evento após hist_ready == kHistSize. A guarda abaixo cobre
@@ -336,28 +309,28 @@ inline bool process_gap_event(uint16_t capture_now) noexcept {
                 return false;
             }
             if (g_seed_armed) {
-                g_state.snap.state = ems::drv::SyncState::FULL_SYNC;
+                g_state.snap.state = ems::drv::SyncState::SYNCED;
                 g_state.snap.phase_A = g_seed_phase_a;
                 g_seed_armed = false;
                 g_seed_probation = true;
                 g_seed_probation_teeth = 0u;
             } else {
-                g_state.snap.state = ems::drv::SyncState::HALF_SYNC;
+                g_state.snap.state = ems::drv::SyncState::SYNCING;
             }
             g_state.tooth_count         = 0u;
             g_state.snap.tooth_index    = 0u;
-            g_state.snap.last_ftm3_capture = capture_now;
+            g_state.snap.last_tim2_capture = capture_now;
             return true;
 
-        case ems::drv::SyncState::HALF_SYNC:
+        case ems::drv::SyncState::SYNCING:
             if (g_state.tooth_count >= kGapThresholdTooth) {
                 // 2º gap na posição correta → sincronismo completo.
                 // A partir deste ponto, tooth_index rastreia a posição angular
                 // com resolução de 6° por dente.
-                g_state.snap.state          = ems::drv::SyncState::FULL_SYNC;
+                g_state.snap.state          = ems::drv::SyncState::SYNCED;
                 g_state.tooth_count         = 0u;
                 g_state.snap.tooth_index    = 0u;
-                g_state.snap.last_ftm3_capture = capture_now;
+                g_state.snap.last_tim2_capture = capture_now;
                 return true;
             }
             // Gap antes de kGapThresholdTooth dentes: pulso espúrio (EMC, dente danificado).
@@ -366,12 +339,12 @@ inline bool process_gap_event(uint16_t capture_now) noexcept {
             g_state.tooth_count = 0u;
             return false;
 
-        case ems::drv::SyncState::FULL_SYNC:
+        case ems::drv::SyncState::SYNCED:
             if (g_state.tooth_count >= kGapThresholdTooth) {
-                // Gap na posição esperada → mantém FULL_SYNC, reinicia contagem.
+                // Gap na posição esperada → mantém SYNCED, reinicia contagem.
                 g_state.tooth_count         = 0u;
                 g_state.snap.tooth_index    = 0u;
-                g_state.snap.last_ftm3_capture = capture_now;
+                g_state.snap.last_tim2_capture = capture_now;
                 return true;
             }
             // Gap inesperado: wheel slip, dente duplo, interferência severa.
@@ -417,51 +390,37 @@ CkpSnapshot ckp_snapshot() noexcept {
     return out;
 }
 
-uint32_t ckp_angle_to_ticks(uint16_t angle_mdeg, uint32_t ref_capture) noexcept {
-    // RESERVADA: sem callers em produção. Domínio TIM5 (62.5 MHz). Ver header.
-    // TIM5: 250 MHz / prescaler 4 = 62.5 MHz → 16.0 ns/tick
-    // tooth_period_ticks = tooth_period_ns × 62.5 ticks/µs / 1000
-    //                    = tooth_period_ns / 16
-    //
-    // Verificação dimensional (angle_mdeg em miligraus, kToothAngleX1000 = 6000 mg/dente):
-    //   Para 6° (1 dente): angle_mdeg = 6000 → ticks = 6000 × T / 6000 = T ✓
-    //   Para 1°:           angle_mdeg = 1000 → ticks = 1000 × T / 6000 = T/6 ✓
-    //
-    // ATENÇÃO: não passar graus inteiros (ex: 6) — causará erro de 1000×.
-    // FIX: retorno e ref_capture atualizados para uint32_t (TIM5 é 32-bit).
-    const uint32_t tooth_period_ticks = g_state.snap.tooth_period_ns / 16u;  // ns → ticks @62.5MHz
-    const uint32_t delta = (static_cast<uint32_t>(angle_mdeg) * tooth_period_ticks)
-                           / kToothAngleX1000;
+uint32_t ckp_angle_to_ticks(uint16_t angle_x10, uint32_t ref_capture) noexcept {
+    static constexpr uint32_t kToothAngleX10 = 60u;
+    // ⚡ CORREÇÃO M3: Guard de divisão por zero
+    if (g_state.snap.tooth_period_ticks == 0u) {
+        return ref_capture;  // sem dados de período → retorna referência sem avanço
+    }
+    const uint32_t delta = (static_cast<uint32_t>(angle_x10) *
+                            g_state.snap.tooth_period_ticks) / kToothAngleX10;
     return ref_capture + delta;  // wrap-around uint32_t correto para aritmética de ticks
 }
 
-// ── ISR do CKP: FTM3 Canal 0 (PTD0, rising edge) ─────────────────────────────
+// ── ISR do CKP: canal primário de captura (rising edge) ──────────────────────
 //
-// CONTEXTO: chamada por FTM3_IRQHandler() em hal/ftm.cpp, NVIC prioridade 1.
+// CONTEXTO: chamada pelo handler de captura em hal/tim.cpp, NVIC prioridade 1.
 // Não há chamada direta por código de usuário.
 //
-// SETUP do FTM3_CnSC (Canal 0) — K64 RM §43.3.5:
-//   CnSC[5:4] MSnB:MSnA = 00  → modo Input Capture (não Output Compare)
-//   CnSC[3:2] ELSnB:ELSnA = 01 → Rising Edge Capture
-//   CnSC[6]   CHIE = 1        → Interrupt Enable
-//   Configurado em hal/ftm.cpp → ftm3_init() durante boot.
+// Setup: canal de captura por borda de subida, configurado em hal/tim.cpp.
 //
 // VANTAGEM vs GPIO/EXTI:
-//   O periférico FTM3 trava o valor do contador em CnV (≡ FTM3_C0V) no exato
+//   O periférico de captura trava o valor do contador no registrador de captura no exato
 //   instante da borda de subida, em hardware. A CPU pode atender a IRQ
 //   vários ciclos depois — o timestamp em C0V permanece válido.
 //   Isso é impossível com GPIO/EXTI onde a CPU leria o contador atual (atrasado).
-FASTRUN void ckp_ftm3_ch0_isr() noexcept {
+FASTRUN void ckp_capture_primary_isr() noexcept {
     // ── 1. Timestamp sem jitter de ISR ────────────────────────────────────
-    // CRÍTICO: lemos FTM3_C0V ANTES de qualquer outra operação.
+    // CRÍTICO: lemos o registrador de captura ANTES de qualquer outra operação.
     // O registrador de captura foi travado pelo HW no instante exato da borda;
-    // leituras posteriores (GPIOD_PDIR, etc.) não afetam o valor capturado.
-    // NÃO ler FTM3_CNT: o contador avançou durante a latência de IRQ.
+    // leituras posteriores de GPIO etc. não afetam o valor capturado.
+    // NÃO ler o contador livre: ele avançou durante a latência de IRQ.
     //
-    // FIX: uint16_t → uint32_t para usar TIM5 como timer 32-bit completo.
-    // A truncagem para 16 bits causava wrap-around incorreto abaixo de ~250 RPM
-    // durante cranking (overflow de 16 bits @ 62.5 MHz ≈ 1,048 ms por tooth).
-    const uint32_t capture_now = FTM3_C0V;  // TIM5_CCR1: 32-bit timestamp travado pelo HW
+    const uint32_t capture_now = CKP_CAPTURE_CH0;  // TIM2_CCR1: timestamp 32-bit travado pelo HW
 
     // ── 2. Delta de ticks (aritmética circular uint32_t) ──────────────────
     // Subtração circular unsigned: correto mesmo com overflow do contador 32-bit.
@@ -469,10 +428,10 @@ FASTRUN void ckp_ftm3_ch0_isr() noexcept {
     const uint32_t delta_ticks = capture_now - g_state.prev_capture;
 
     // ── 3. Anti-glitch por período mínimo ────────────────────────────────
-    // Estratégia preferida a checar GPIOD_PDIR depois da captura: a 62.5 MHz
+    // Estratégia preferida a checar o GPIO depois da captura: a 250 MHz
     // o pino pode ter retornado LOW antes da CPU ler o registrador de GPIO,
     // descartando capturas legítimas em alta rotação (> 4000 RPM).
-    // Período mínimo aceitável: dente a 20000 RPM → 62.5 MHz / (58 * 20000/60)
+    // Período mínimo aceitável: dente a 20000 RPM → 250 MHz / (58 * 20000/60)
     //   ≈ 3228 ticks; usamos 50 como limite inferior conservador para
     //   rejeitar glitches de EMC (< ~800 ns) sem afetar operação normal.
     static constexpr uint32_t kMinToothTicks = 50u;
@@ -481,9 +440,9 @@ FASTRUN void ckp_ftm3_ch0_isr() noexcept {
     }
 
     g_state.prev_capture                = capture_now;
-    g_state.snap.last_ftm3_capture      = capture_now;
+    g_state.snap.last_tim2_capture      = capture_now;
 
-    const uint32_t period_ns = ticks_to_ns(delta_ticks);
+    const uint32_t period_ticks = delta_ticks;
 
     // ── 4. Construção do histórico (primeiros kHistSize dentes) ───────────
     // Antes do histórico estar completo (hist_ready < kHistSize), aceitamos
@@ -492,8 +451,8 @@ FASTRUN void ckp_ftm3_ch0_isr() noexcept {
     if (g_state.hist_ready < kHistSize) {
         hist_push(delta_ticks);
         ++g_state.tooth_count;
-        g_state.snap.tooth_period_ns = period_ns;
-        g_state.snap.rpm_x10 = rpm_x10_from_period_ns(period_ns);
+        g_state.snap.tooth_period_ticks = period_ticks;
+        g_state.snap.rpm_x10 = rpm_x10_from_period_ticks(period_ticks);
         sensors_on_tooth(g_state.snap);
         schedule_on_tooth(g_state.snap);
         return;
@@ -510,7 +469,7 @@ FASTRUN void ckp_ftm3_ch0_isr() noexcept {
     // O limiar 1,5× separa o gap de qualquer dente normal válido (máx 120% de avg).
     //
     // NOTA (CKP-02): A verificação de tooth_count >= kGapThresholdTooth é feita
-    // DENTRO de process_gap_event() para todos os estados, incluindo WAIT_GAP e
+    // DENTRO de process_gap_event() para todos os estados, incluindo WAIT e
     // LOSS_OF_SYNC. Isso garante proteção uniforme contra gaps prematuros durante
     // bootstrap do histórico (hist_ready < kHistSize) onde o filtro de razão acima
     // ainda não estava activo nas iterações anteriores.
@@ -539,11 +498,11 @@ FASTRUN void ckp_ftm3_ch0_isr() noexcept {
     // ── 6. Processamento de dente normal ──────────────────────────────────
     hist_push(delta_ticks);
 
-    g_state.snap.tooth_period_ns = period_ns;
-    g_state.snap.rpm_x10 = rpm_x10_from_period_ns(period_ns);
+    g_state.snap.tooth_period_ticks = period_ticks;
+    g_state.snap.rpm_x10 = rpm_x10_from_period_ticks(period_ticks);
 
     // Incrementa tooth_count e tooth_index apenas em estados sincronizados/tentando.
-    if (g_state.snap.state != ems::drv::SyncState::WAIT_GAP &&
+    if (g_state.snap.state != ems::drv::SyncState::WAIT &&
         g_state.snap.state != ems::drv::SyncState::LOSS_OF_SYNC) {
         ++g_state.tooth_count;
         // tooth_index: posição angular dentro da revolução (0 = após gap, 57 = último dente)
@@ -552,7 +511,7 @@ FASTRUN void ckp_ftm3_ch0_isr() noexcept {
                 ? static_cast<uint16_t>(g_state.snap.tooth_index + 1u)
                 : 0u;
     } else {
-        // Em WAIT_GAP / LOSS_OF_SYNC: incrementa tooth_count para detectar
+        // Em WAIT / LOSS_OF_SYNC: incrementa tooth_count para detectar
         // o limiar mínimo de dentes antes de aceitar o próximo gap.
         ++g_state.tooth_count;
     }
@@ -561,8 +520,8 @@ FASTRUN void ckp_ftm3_ch0_isr() noexcept {
     // Se passaram mais de kMaxTeethBeforeLoss dentes sem um gap:
     //   → o gap foi perdido (interferência, aceleração brusca, falha de sensor)
     if (g_state.tooth_count > kMaxTeethBeforeLoss) {
-        if (g_state.snap.state == ems::drv::SyncState::HALF_SYNC ||
-            g_state.snap.state == ems::drv::SyncState::FULL_SYNC) {
+        if (g_state.snap.state == ems::drv::SyncState::SYNCING ||
+            g_state.snap.state == ems::drv::SyncState::SYNCED) {
             g_state.snap.state  = ems::drv::SyncState::LOSS_OF_SYNC;
             g_state.tooth_count = 0u;
         }
@@ -576,7 +535,7 @@ FASTRUN void ckp_ftm3_ch0_isr() noexcept {
             g_seed_probation = false;
             g_seed_probation_teeth = 0u;
             ++g_seed_rejected_count;
-            g_state.snap.state = ems::drv::SyncState::HALF_SYNC;
+            g_state.snap.state = ems::drv::SyncState::SYNCING;
             g_state.tooth_count = 0u;
             g_state.snap.tooth_index = 0u;
         }
@@ -586,15 +545,15 @@ FASTRUN void ckp_ftm3_ch0_isr() noexcept {
     prime_on_tooth(g_state.snap);
 }
 
-// ── ISR do cam sensor: FTM3 Canal 1 (PTD1, rising edge) ──────────────────────
+// ── ISR do cam sensor: canal secundário de captura (rising edge) ────────────
 // Cada borda de subida do cam sensor indica meio ciclo de motor (180° de virabrequim).
 // phase_A alterna para permitir ao agendador identificar qual par de cilindros está
 // no tempo de injeção (cilindros 1/4 vs 2/3 para motor 4 cilindros em linha).
-FASTRUN void ckp_ftm3_ch1_isr() noexcept {
-    if ((GPIOD_PDIR & (1u << 1u)) == 0u) {
+FASTRUN void ckp_capture_secondary_isr() noexcept {
+    if ((CKP_GPIO_IDR & (1u << 1u)) == 0u) {
         return;  // anti-glitch: apenas rising edges reais
     }
-    static_cast<void>(FTM3_C1V);   // leitura limpa o CHF do canal
+    static_cast<void>(CKP_CAPTURE_CH1);   // leitura limpa o flag do canal
     g_state.snap.phase_A = !g_state.snap.phase_A;
     if (g_seed_probation) {
         g_seed_probation = false;
@@ -632,16 +591,16 @@ uint32_t ckp_seed_rejected_count() noexcept {
 #if defined(EMS_HOST_TEST)
 void ckp_test_reset() noexcept {
     g_state = DecoderState{
-        CkpSnapshot{0u, 0u, 0u, 0u, SyncState::WAIT_GAP, false},
+        CkpSnapshot{0u, 0u, 0u, 0u, SyncState::WAIT, false},
         0u,
         {0u, 0u, 0u},
         0u,
         0u,
         0u,
     };
-    ems_test_ftm3_c0v   = 0u;
-    ems_test_ftm3_c1v   = 0u;
-    ems_test_gpiod_pdir = 0u;
+    ems_test_ckp_capture_ch0 = 0u;
+    ems_test_ckp_capture_ch1 = 0u;
+    ems_test_ckp_gpio_idr = 0u;
     g_seed_armed = false;
     g_seed_phase_a = false;
     g_seed_probation = false;
@@ -651,8 +610,8 @@ void ckp_test_reset() noexcept {
     g_seed_rejected_count = 0u;
 }
 
-uint32_t ckp_test_rpm_x10_from_period_ns(uint32_t period_ns) noexcept {
-    return rpm_x10_from_period_ns(period_ns);
+uint32_t ckp_test_rpm_x10_from_period_ticks(uint32_t period_ticks) noexcept {
+    return rpm_x10_from_period_ticks(period_ticks);
 }
 #endif
 

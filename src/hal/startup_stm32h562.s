@@ -112,7 +112,7 @@ g_pfnVectors:
     .word  SPI3_IRQHandler             /* IRQ 57: SPI3                     */
     .word  USART1_IRQHandler           /* IRQ 58: USART1                   */
     .word  USART2_IRQHandler           /* IRQ 59: USART2                   */
-    .word  USART3_IRQHandler           /* IRQ 60: USART3 ← TunerStudio     */
+    .word  USART3_IRQHandler           /* IRQ 60: USART3 debug serial      */
     .word  UART4_IRQHandler            /* IRQ 61: UART4                    */
     .word  UART5_IRQHandler            /* IRQ 62: UART5                    */
     .word  UART7_IRQHandler            /* IRQ 63: UART7                    */
@@ -148,7 +148,7 @@ g_pfnVectors:
     .word  SAI1_IRQHandler             /* IRQ 93: SAI1                     */
     .word  SAI2_IRQHandler             /* IRQ 94: SAI2                     */
     .word  TIM3_IRQHandler             /* IRQ 95: TIM3 ← PWM IACV/waste    */
-    .word  TIM4_IRQHandler             /* IRQ 96: TIM4 ← PWM VVT           */
+    .word  TIM4_IRQHandler             /* IRQ 96: TIM4                     */
     .word  TIM8_BRK_IRQHandler         /* IRQ 97: TIM8 Break               */
     .word  TIM8_UP_IRQHandler          /* IRQ 98: TIM8 Update              */
     .word  TIM8_TRG_COM_IRQHandler     /* IRQ 99: TIM8 Trigger/Comm        */

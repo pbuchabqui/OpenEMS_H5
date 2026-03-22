@@ -38,15 +38,15 @@ void reset_all() {
     ems::drv::sensors_test_reset();
 }
 
-// tooth_period_ns = 1_000_000 ns → ticks FTM3 = 1_000_000*60/1000 = 60_000
-// last_ftm3_capture e rpm_x10 irrelevantes para os testes de sensor
+// tooth_period_ticks = 60_000 no domínio do timer CKP/PDB usado pelos testes.
+// last_tim2_capture e rpm_x10 são irrelevantes para os testes de sensor.
 ems::drv::CkpSnapshot mk_snap() {
     return ems::drv::CkpSnapshot{
-        1000000u,                       // tooth_period_ns
+        60000u,                         // tooth_period_ticks
         0u,                             // tooth_index
-        10000u,                         // last_ftm3_capture
+        10000u,                         // last_tim2_capture
         0u,                             // rpm_x10
-        ems::drv::SyncState::FULL_SYNC,
+        ems::drv::SyncState::SYNCED,
         false
     };
 }
@@ -163,14 +163,11 @@ void test_fault_ranges_consistent_after_init_and_reset() {
     }
 }
 
-// [FIX-2 revisado] sensors_on_tooth converte tooth_period_ns → ticks (FTM3 60 MHz)
-// e passa diretamente para adc_pdb_on_tooth (sem divisão — PDB também a 60 MHz).
-// mk_snap: tooth_period_ns = 1_000_000 ns
-//   ticks = 1_000_000 * 60 / 1000 = 60_000
-//   pdb_mod = 60_000 (sem divisão por 2)
+// [FIX-2 revisado] sensors_on_tooth já recebe tooth_period_ticks no domínio do
+// timer CKP/PDB e repassa diretamente para adc_pdb_on_tooth.
 void test_pdb_mod_uses_ftm3_ticks_directly() {
     reset_all();
-    auto snap = mk_snap();          // tooth_period_ns = 1_000_000
+    auto snap = mk_snap();          // tooth_period_ticks = 60_000
     ems::drv::sensors_on_tooth(snap);
     TEST_ASSERT_EQ_U32(60000u, ems::hal::adc_test_last_pdb_mod());
 }

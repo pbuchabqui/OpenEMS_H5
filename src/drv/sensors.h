@@ -16,15 +16,15 @@ namespace ems::drv {
 
 struct SensorData {
     uint16_t map_kpa_x10;         // MAP kPa × 10
-    uint32_t maf_gps_x100;        // MAF g/s × 100
+    uint16_t maf_gps_x100;        // MAF g/s × 100
     uint16_t tps_pct_x10;         // TPS % × 10
     int16_t  clt_degc_x10;        // CLT °C × 10
     int16_t  iat_degc_x10;        // IAT °C × 10
-    // o2_mv REMOVIDO — sistema usa exclusivamente WBO2 via CAN (ID 0x180)
     uint16_t fuel_press_kpa_x10;  // pressão combustível kPa × 10
     uint16_t oil_press_kpa_x10;   // pressão óleo kPa × 10
     uint16_t vbatt_mv;            // tensão bateria mV
     uint8_t  fault_bits;          // bitmask de falhas ativas
+    uint16_t o2_mv;               // Contrato v2.2: O2 em mV
     // Expansão AN1-4 — passthrough, atualizados em sensors_tick_100ms()
     uint16_t an1_raw;
     uint16_t an2_raw;
@@ -55,10 +55,7 @@ void sensors_tick_100ms() noexcept;
 void sensors_maf_freq_capture_isr(uint16_t period_ticks) noexcept;
 void sensors_set_tps_cal(uint16_t raw_min, uint16_t raw_max) noexcept;
 void sensors_set_range(SensorId id, SensorRange range) noexcept;
-// FIX-6: retorna por valor (snapshot atômico com CPSID/CPSIE) em vez de
-// referência. Previne torn read: ISR FTM3 (prio 1) pode atualizar g_data entre
-// acessos sucessivos a campos diferentes via referência.
-SensorData sensors_get() noexcept;
+const SensorData& sensors_get() noexcept;
 
 // CRITICAL FIX: Sensor validation functions
 bool validate_sensor_range(SensorId id, uint16_t raw_value) noexcept;

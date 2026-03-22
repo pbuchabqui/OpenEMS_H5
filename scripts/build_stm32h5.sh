@@ -22,12 +22,14 @@ cd "${ROOT_DIR}"
 STM32_SRCS=(
     src/main.cpp
     src/hal/system.cpp
-    src/hal/timer.cpp
+    src/hal/tim.cpp
     src/hal/adc.cpp
-    src/hal/can.cpp
-    src/hal/uart.cpp
-    src/hal/flexnvm.cpp
+    src/hal/fdcan.cpp
+    src/hal/cordic.cpp
+    src/hal/flash_nvm.cpp
+    src/hal/usb_cdc.cpp
     src/drv/ckp.cpp
+    src/drv/scheduler.cpp
     src/drv/sensors.cpp
     src/engine/fuel_calc.cpp
     src/engine/ign_calc.cpp

@@ -1,5 +1,5 @@
 # OpenEMS_H5
-Firmware ECU open-source para **STM32H562RGT6** (ARM Cortex-M33 @ 250 MHz).
+Firmware ECU para **STM32H562RGT6** seguindo a arquitetura **OpenEMS v2.2**.
 
 ---
 
@@ -128,6 +128,21 @@ Se preferir uma interface gráfica:
 
 ---
 
+## Arquitetura v2.2
+
+- `TIM2` 32-bit: captura `CKP/CMP` em `PA0/PA1`
+- `TIM5` 32-bit: base absoluta do scheduler
+- `TIM1`: `INJ1-3` em `PA8/PA9/PA10`
+- `TIM15`: `INJ4` em `PC12`
+- `TIM8`: `IGN1-4` em `PC6/PC7/PC8/PC9`
+- `TIM3`: PWM de `IACV/Wastegate` em `PB0/PB1`
+- `TIM12`: PWM de `VVT` em `PB14/PB15`
+- `FDCAN1`: `PB7/PB8`
+- `USB CDC ACM`: `PA11/PA12`
+- `CORDIC`: usado por `hal/cordic`
+
+O backend de produção de `USB CDC ACM` ainda precisa ser implementado sobre o periférico USB do STM32H5. O transporte serial falso foi removido de propósito.
+
 ## Estrutura do projeto
 
 ```
@@ -140,19 +155,21 @@ OpenEMS_H5/
     ├── main.cpp                    # Ponto de entrada
     ├── hal/                        # Hardware Abstraction Layer
     │   ├── system.cpp              # Clock PLL 250 MHz, SysTick, IWDG
-    │   ├── timer.cpp               # TIM1/3/4/5/6
+    │   ├── tim.cpp                 # TIM2/TIM5/TIM1/TIM8/TIM15/TIM3/TIM12
     │   ├── adc.cpp                 # ADC1 + ADC2
-    │   ├── can.cpp                 # FDCAN1 (CAN FD)
-    │   ├── uart.cpp                # USART1
-    │   ├── flexnvm.cpp             # EEPROM emulada (Flash Bank2)
+    │   ├── fdcan.cpp               # FDCAN1 (CAN FD)
+    │   ├── usb_cdc.cpp             # USB CDC ACM (target backend pendente)
+    │   ├── cordic.cpp              # CORDIC hardware / referência host
+    │   ├── flash_nvm.cpp           # EEPROM emulada (Flash Bank2)
     │   ├── regs.h                  # Registradores STM32H562
     │   ├── startup_stm32h562.s     # Vetor de interrupções + Reset_Handler
     │   └── stm32h562rgt6.ld        # Linker script
     ├── drv/                        # Drivers de periféricos
     │   ├── ckp.cpp                 # Sensor de posição do virabrequim
+    │   ├── scheduler.cpp           # Scheduler absoluto v2.2
     │   └── sensors.cpp             # Processamento de sensores
     ├── engine/                     # Lógica de controle do motor
-    │   ├── ecu_sched.cpp           # Scheduler principal da ECU
+    │   ├── ecu_sched.cpp           # Scheduler angular existente
     │   ├── fuel_calc.cpp           # Cálculo de injeção
     │   ├── ign_calc.cpp            # Cálculo de ignição
     │   └── ...

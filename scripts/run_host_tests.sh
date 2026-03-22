@@ -27,6 +27,11 @@ run_test test_ckp \
   test/drv/test_ckp.cpp \
   src/drv/ckp.cpp
 
+run_test test_scheduler \
+  test/drv/test_scheduler.cpp \
+  src/drv/scheduler.cpp \
+  src/hal/tim.cpp
+
 run_test test_sensors \
   test/drv/test_sensors.cpp \
   src/drv/sensors.cpp \
@@ -79,14 +84,14 @@ run_test test_iacv \
 run_test test_knock \
   test/engine/test_knock.cpp \
   src/engine/knock.cpp \
-  src/hal/flexnvm.cpp
+  src/hal/flash_nvm.cpp
 
 run_test test_ts_protocol \
   test/app/test_ts_protocol.cpp \
   test/app/stub_ecu_sched_ivc.cpp \
   src/app/tuner_studio.cpp \
   src/app/can_stack.cpp \
-  src/hal/can.cpp \
+  src/hal/fdcan.cpp \
   src/engine/fuel_calc.cpp \
   src/engine/ign_calc.cpp \
   src/engine/table3d.cpp
@@ -94,11 +99,26 @@ run_test test_ts_protocol \
 run_test test_can \
   test/app/test_can.cpp \
   src/app/can_stack.cpp \
-  src/hal/can.cpp
+  src/hal/fdcan.cpp
 
-run_test test_flexnvm \
-  test/hal/test_flexnvm.cpp \
-  src/hal/flexnvm.cpp
+run_test test_flash_nvm \
+  test/hal/test_flash_nvm.cpp \
+  src/hal/flash_nvm.cpp
+
+run_test test_cordic \
+  test/hal/test_cordic.cpp \
+  src/hal/cordic.cpp
+
+run_test test_usb_cdc \
+  test/hal/test_usb_cdc.cpp \
+  src/hal/usb_cdc.cpp \
+  src/app/tuner_studio.cpp \
+  src/app/can_stack.cpp \
+  src/hal/fdcan.cpp \
+  src/engine/fuel_calc.cpp \
+  src/engine/ign_calc.cpp \
+  src/engine/table3d.cpp \
+  test/app/stub_ecu_sched_ivc.cpp
 
 # test_ecu_sched: compiled as C++ (was MISRA-C module)
 echo ""
@@ -125,8 +145,9 @@ echo "==> [test_pipeline_backbone] build"
 g++ -std=c++17 -DEMS_HOST_TEST -Isrc \
   test/engine/test_pipeline_backbone.cpp \
   src/drv/ckp.cpp \
+  src/drv/scheduler.cpp \
   src/engine/cycle_sched.cpp \
-  src/engine/ecu_sched.cpp \
+  src/hal/tim.cpp \
   src/engine/fuel_calc.cpp \
   src/engine/ign_calc.cpp \
   src/engine/table3d.cpp \

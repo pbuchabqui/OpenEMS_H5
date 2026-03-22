@@ -193,7 +193,7 @@ void test_get_sensor_health_status_map_fault() {
     ems::hal::adc_test_set_raw_adc0(ems::hal::Adc0Channel::TPS_SE12, 1000u);
     ems::hal::adc_test_set_raw_adc0(ems::hal::Adc0Channel::O2_SE4B, 1000u);
 
-    ems::drv::CkpSnapshot snap = {100000u, 0u, 0u, 0u, ems::drv::SyncState::FULL_SYNC, false};
+    ems::drv::CkpSnapshot snap = {100000u, 0u, 0u, 0u, ems::drv::SyncState::SYNCED, false};
     for (int i = 0; i < 15; ++i) {
         ems::drv::sensors_on_tooth(snap);
     }

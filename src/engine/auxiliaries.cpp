@@ -14,10 +14,10 @@
 #include "sensors.h"
 #endif
 
-#if __has_include("hal/ftm.h")
-#include "hal/ftm.h"
-#elif __has_include("ftm.h")
-#include "ftm.h"
+#if __has_include("hal/tim.h")
+#include "hal/tim.h"
+#elif __has_include("tim.h")
+#include "tim.h"
 #endif
 
 namespace {
@@ -387,7 +387,7 @@ void run_iac_control(const ems::drv::CkpSnapshot& snap,
     }
 
     g.iac_duty_x10 = static_cast<uint16_t>(out_x10);
-    ems::hal::ftm1_set_duty(0u, g.iac_duty_x10);
+    ems::hal::tim3_set_duty(0u, g.iac_duty_x10);
 }
 
 void run_wastegate_control(const ems::drv::CkpSnapshot& snap,
@@ -408,7 +408,7 @@ void run_wastegate_control(const ems::drv::CkpSnapshot& snap,
     if (g.wg_failsafe) {
         g.wg_duty_x10 = 0u;
         g.wg_integrator_x10 = 0;
-        ems::hal::ftm1_set_duty(1u, 0u);
+        ems::hal::tim3_set_duty(1u, 0u);
         return;
     }
 
@@ -428,7 +428,7 @@ void run_wastegate_control(const ems::drv::CkpSnapshot& snap,
     }
 
     g.wg_duty_x10 = static_cast<uint16_t>(out);
-    ems::hal::ftm1_set_duty(1u, g.wg_duty_x10);
+    ems::hal::tim3_set_duty(1u, g.wg_duty_x10);
 }
 
 uint16_t run_vvt_pid(int16_t target_deg_x10,
@@ -460,7 +460,7 @@ void run_vvt_control(const ems::drv::CkpSnapshot& snap,
     }
 
     const bool confirmed =
-        (snap.state == ems::drv::SyncState::FULL_SYNC) &&
+        (snap.state == ems::drv::SyncState::SYNCED) &&
         ((g.time_ms - g.vvt_last_phase_toggle_ms) <= kVvtConfirmTimeoutMs);
 
     if (!confirmed) {
@@ -468,8 +468,8 @@ void run_vvt_control(const ems::drv::CkpSnapshot& snap,
         g.vvt_adm_duty_x10 = 0u;
         g.vvt_esc_integrator_x10 = 0;
         g.vvt_adm_integrator_x10 = 0;
-        ems::hal::ftm2_set_duty(0u, 0u);
-        ems::hal::ftm2_set_duty(1u, 0u);
+        ems::hal::tim12_set_duty(0u, 0u);
+        ems::hal::tim12_set_duty(1u, 0u);
         return;
     }
 
@@ -480,8 +480,8 @@ void run_vvt_control(const ems::drv::CkpSnapshot& snap,
     g.vvt_esc_duty_x10 = run_vvt_pid(target_esc, pos_deg_x10, g.vvt_esc_integrator_x10);
     g.vvt_adm_duty_x10 = run_vvt_pid(target_adm, pos_deg_x10, g.vvt_adm_integrator_x10);
 
-    ems::hal::ftm2_set_duty(0u, g.vvt_esc_duty_x10);
-    ems::hal::ftm2_set_duty(1u, g.vvt_adm_duty_x10);
+    ems::hal::tim12_set_duty(0u, g.vvt_esc_duty_x10);
+    ems::hal::tim12_set_duty(1u, g.vvt_adm_duty_x10);
 }
 
 void run_fan_control(int16_t clt_x10) noexcept {
@@ -534,13 +534,13 @@ void auxiliaries_init() noexcept {
     // FTM1_CH0 (IACV) e FTM1_CH1 (Wastegate) compartilham o mesmo MOD:
     // não é possível 12.5 Hz e 15 Hz simultâneos em hardware no mesmo FTM.
     // Estratégia: fixa FTM1 em 15 Hz (prioridade para WG) e calibra IACV por duty.
-    ems::hal::ftm1_pwm_init(kAuxFtm1PwmHz);
-    ems::hal::ftm2_pwm_init(kAuxFtm2PwmHz);
+    ems::hal::tim3_pwm_init(kAuxFtm1PwmHz);
+    ems::hal::tim12_pwm_init(kAuxFtm2PwmHz);
 
-    ems::hal::ftm1_set_duty(0u, 0u);
-    ems::hal::ftm1_set_duty(1u, 0u);
-    ems::hal::ftm2_set_duty(0u, 0u);
-    ems::hal::ftm2_set_duty(1u, 0u);
+    ems::hal::tim3_set_duty(0u, 0u);
+    ems::hal::tim3_set_duty(1u, 0u);
+    ems::hal::tim12_set_duty(0u, 0u);
+    ems::hal::tim12_set_duty(1u, 0u);
 
     SIM_SCGC5 |= SIM_SCGC5_PORTB_MASK;
     PORTB_PCR16 = PCR_MUX_GPIO;

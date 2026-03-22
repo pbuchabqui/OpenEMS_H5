@@ -75,7 +75,7 @@ void test_pw_application_with_floor_and_clamp() {
 static void sim_teeth(uint32_t n, uint32_t rpm_x10) {
     ems::drv::CkpSnapshot snap{};
     snap.rpm_x10 = rpm_x10;
-    snap.state   = ems::drv::SyncState::WAIT_GAP;
+    snap.state   = ems::drv::SyncState::WAIT;
     for (uint32_t i = 0u; i < n; ++i) {
         ems::drv::prime_on_tooth(snap);
     }
@@ -102,10 +102,10 @@ void test_prime_pulse_no_sync_required() {
     ems::engine::quick_crank_reset();
     ems::engine::quick_crank_set_clt(0);  // 0°C
 
-    // WAIT_GAP state (snap.state = WAIT_GAP) — deve disparar mesmo assim
+    // WAIT state — deve disparar mesmo assim
     ems::drv::CkpSnapshot snap{};
     snap.rpm_x10 = 2000u;
-    snap.state   = ems::drv::SyncState::WAIT_GAP;
+    snap.state   = ems::drv::SyncState::WAIT;
     for (uint8_t i = 0u; i < 5u; ++i) {
         ems::drv::prime_on_tooth(snap);
     }

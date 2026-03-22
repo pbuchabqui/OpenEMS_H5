@@ -3,7 +3,7 @@
 
 #define EMS_HOST_TEST 1
 #include "app/can_stack.h"
-#include "hal/can.h"
+#include "hal/fdcan.h"
 
 namespace {
 
@@ -33,10 +33,9 @@ int g_tests_failed = 0;
 
 ems::drv::CkpSnapshot make_ckp(uint32_t rpm_x10) {
     return ems::drv::CkpSnapshot{0u, 0u, 0u, rpm_x10,
-                                  ems::drv::SyncState::FULL_SYNC, false};
+                                  ems::drv::SyncState::SYNCED, false};
 }
 
-// SensorData sem o campo o2_mv
 ems::drv::SensorData make_sensors() {
     return ems::drv::SensorData{
         998u,    // map_kpa_x10
@@ -44,11 +43,11 @@ ems::drv::SensorData make_sensors() {
         457u,    // tps_pct_x10
         930,     // clt_degc_x10   →  93 °C
         250,     // iat_degc_x10   →  25 °C
-        // o2_mv REMOVIDO
         3510u,   // fuel_press_kpa_x10
         4020u,   // oil_press_kpa_x10
         13800u,  // vbatt_mv
-        0u       // fault_bits
+        0u,      // fault_bits
+        0u       // o2_mv
     };
 }
 
@@ -63,14 +62,15 @@ void test_rx_ignores_non_wbo2_id() {
     const ems::drv::SensorData  sensors = make_sensors();
 
     // Injetar frame com ID=0x181 (não é o WBO2 0x180), dados plausíveis de λ
-    ems::hal::CanFrame intruder{};
+    ems::hal::FdcanFrame intruder{};
     intruder.id       = 0x181u;
-    intruder.dlc      = 3u;
+    intruder.dlc_bytes = 3u;
     intruder.extended = false;
+    intruder.brs      = false;
     intruder.data[0]  = 0xE8u;  // λ=1000 milli se fosse 0x180
     intruder.data[1]  = 0x03u;
     intruder.data[2]  = 0x01u;
-    TEST_ASSERT_TRUE(ems::hal::can_test_inject_rx(intruder));
+    TEST_ASSERT_TRUE(ems::hal::fdcan_test_inject_rx(intruder));
 
     // can_stack_process() consome a fila RX internamente
     ems::app::can_stack_process(50u, ckp, sensors, 0, 0u, 0, 0u, 0u, 0x00u);
@@ -81,7 +81,7 @@ void test_rx_ignores_non_wbo2_id() {
     TEST_ASSERT_TRUE(ems::app::can_stack_wbo2_fault());
 }
 
-// ─── test 2: serialização 0x400 ──────────────────────────────────────────────
+// ─── test 2: serialização 0x400 CAN-FD 48 bytes ─────────────────────────────
 
 void test_tx_0x400_serialization() {
     ems::app::can_stack_test_reset();
@@ -92,52 +92,48 @@ void test_tx_0x400_serialization() {
     ems::app::can_stack_process(10u, ckp, sensors,
         12,    // advance_deg
         45u,   // pw_ms_x10
-        0,     // stft_pct
+        -3,    // stft_pct
         0u, 0u,
         0x25u  // status_bits do chamador (sem bit7)
     );
 
-    ems::hal::CanFrame out = {};
-    TEST_ASSERT_TRUE(ems::hal::can_test_pop_tx(out));
+    ems::hal::FdcanFrame out = {};
+    TEST_ASSERT_TRUE(ems::hal::fdcan_test_pop_tx(out));
     TEST_ASSERT_EQ_U32(0x400u, out.id);
-    TEST_ASSERT_EQ_U32(8u,     out.dlc);
-    TEST_ASSERT_EQ_U32(3215u & 0xFFu,       out.data[0]); // RPM LSB
-    TEST_ASSERT_EQ_U32((3215u >> 8u) & 0xFFu, out.data[1]); // RPM MSB
-    TEST_ASSERT_EQ_U32(99u,  out.data[2]);   // MAP: 998/10 = 99
-    TEST_ASSERT_EQ_U32(45u,  out.data[3]);   // TPS: 457/10 = 45
-    TEST_ASSERT_EQ_U32(133u, out.data[4]);   // CLT: 93 + 40 = 133
-    TEST_ASSERT_EQ_U32(52u,  out.data[5]);   // avanço: 12 + 40 = 52
-    TEST_ASSERT_EQ_U32(45u,  out.data[6]);   // PW
-    // bit7 (STATUS_WBO2_FAULT) deve estar SETADO pois WBO2 nunca recebeu frame
-    TEST_ASSERT_TRUE((out.data[7] & ems::app::STATUS_WBO2_FAULT) != 0u);
-    TEST_ASSERT_EQ_U32(0x25u | ems::app::STATUS_WBO2_FAULT, out.data[7]);
+    TEST_ASSERT_EQ_U32(48u,     out.dlc_bytes);
+    TEST_ASSERT_EQ_U32(3215u & 0xFFu,         out.data[0]);
+    TEST_ASSERT_EQ_U32((3215u >> 8u) & 0xFFu, out.data[1]);
+    TEST_ASSERT_EQ_U32(998u & 0xFFu,          out.data[2]);
+    TEST_ASSERT_EQ_U32((998u >> 8u) & 0xFFu,  out.data[3]);
+    TEST_ASSERT_EQ_U32(457u & 0xFFu,          out.data[4]);
+    TEST_ASSERT_EQ_U32((457u >> 8u) & 0xFFu,  out.data[5]);
+    TEST_ASSERT_EQ_U32(930u & 0xFFu,          out.data[6]);
+    TEST_ASSERT_EQ_U32((930u >> 8u) & 0xFFu,  out.data[7]);
+    TEST_ASSERT_EQ_U32(120u, out.data[10]);   // advance_x10
+    TEST_ASSERT_EQ_U32(0x94u, out.data[12]);  // pw_us = 4500
+    TEST_ASSERT_EQ_U32(0x11u, out.data[13]);
+    TEST_ASSERT_EQ_U32(0xE2u, out.data[16]);  // stft -3.0% -> -30 int16
+    TEST_ASSERT_EQ_U32(0xFFu, out.data[17]);
+    TEST_ASSERT_EQ_U32(0x25u | ems::app::STATUS_WBO2_FAULT, out.data[36]);
 }
 
-// ─── test 3: serialização 0x401 ──────────────────────────────────────────────
-
-void test_tx_0x401_serialization() {
+void test_tx_0x400_carries_pressures_and_uptime() {
     ems::app::can_stack_test_reset();
     const ems::drv::CkpSnapshot ckp     = make_ckp(10000u);
     const ems::drv::SensorData  sensors = make_sensors();
 
     ems::app::can_stack_process(100u, ckp, sensors, 0, 0u, -7, 32u, 64u, 0u);
 
-    ems::hal::CanFrame out0 = {};
-    ems::hal::CanFrame out1 = {};
-    TEST_ASSERT_TRUE(ems::hal::can_test_pop_tx(out0));
-    TEST_ASSERT_TRUE(ems::hal::can_test_pop_tx(out1));
-
-    const ems::hal::CanFrame& slow = (out0.id == 0x401u) ? out0 : out1;
-    TEST_ASSERT_EQ_U32(0x401u, slow.id);
-    TEST_ASSERT_EQ_U32(8u,     slow.dlc);
-    TEST_ASSERT_EQ_U32(3510u & 0xFFu,         slow.data[0]); // fuel LSB
-    TEST_ASSERT_EQ_U32((3510u >> 8u) & 0xFFu, slow.data[1]); // fuel MSB
-    TEST_ASSERT_EQ_U32(4020u & 0xFFu,         slow.data[2]); // oil LSB
-    TEST_ASSERT_EQ_U32((4020u >> 8u) & 0xFFu, slow.data[3]); // oil MSB
-    TEST_ASSERT_EQ_U32(65u,  slow.data[4]);   // IAT: 25 + 40 = 65
-    TEST_ASSERT_EQ_U32(93u,  slow.data[5]);   // STFT: -7 + 100 = 93
-    TEST_ASSERT_EQ_U32(32u,  slow.data[6]);   // VVT intake
-    TEST_ASSERT_EQ_U32(64u,  slow.data[7]);   // VVT exhaust
+    ems::hal::FdcanFrame out = {};
+    TEST_ASSERT_TRUE(ems::hal::fdcan_test_pop_tx(out));
+    TEST_ASSERT_EQ_U32(0x400u, out.id);
+    TEST_ASSERT_EQ_U32(3510u & 0xFFu,          out.data[18]);
+    TEST_ASSERT_EQ_U32((3510u >> 8u) & 0xFFu,  out.data[19]);
+    TEST_ASSERT_EQ_U32(4020u & 0xFFu,          out.data[20]);
+    TEST_ASSERT_EQ_U32((4020u >> 8u) & 0xFFu,  out.data[21]);
+    TEST_ASSERT_EQ_U32(13800u & 0xFFu,         out.data[22]);
+    TEST_ASSERT_EQ_U32((13800u >> 8u) & 0xFFu, out.data[23]);
+    TEST_ASSERT_EQ_U32(100u, out.data[38]);    // uptime_ms LSB
 }
 
 // ─── test 4: RX WBO2 + safe lambda + timeout ─────────────────────────────────
@@ -153,14 +149,15 @@ void test_rx_wbo2_safe_lambda_and_timeout() {
                        ems::app::can_stack_lambda_milli_safe(0u));
 
     // Injeta frame WBO2: lambda = 0x041A = 1050
-    ems::hal::CanFrame in = {};
+    ems::hal::FdcanFrame in = {};
     in.id       = 0x180u;
-    in.dlc      = 8u;
+    in.dlc_bytes = 8u;
     in.extended = false;
+    in.brs      = false;
     in.data[0]  = 0x1Au;
     in.data[1]  = 0x04u;   // 1050 little-endian
     in.data[2]  = 0x55u;   // status WBO2 externo
-    TEST_ASSERT_TRUE(ems::hal::can_test_inject_rx(in));
+    TEST_ASSERT_TRUE(ems::hal::fdcan_test_inject_rx(in));
 
     // Processa em t=100 ms
     ems::app::can_stack_process(100u, ckp, sensors, 0, 0u, 0, 0u, 0u, 0u);
@@ -190,27 +187,26 @@ void test_status_bits_wbo2_fault_flag() {
     const ems::drv::CkpSnapshot ckp     = make_ckp(5000u);
     const ems::drv::SensorData  sensors = make_sensors();
 
-    // t=10: sem frame → fault forçado no data[7]
+    // t=10: sem frame → fault forçado no payload único
     ems::app::can_stack_process(10u, ckp, sensors, 0, 0u, 0, 0u, 0u, 0x00u);
-    ems::hal::CanFrame f = {};
-    TEST_ASSERT_TRUE(ems::hal::can_test_pop_tx(f));
+    ems::hal::FdcanFrame f = {};
+    TEST_ASSERT_TRUE(ems::hal::fdcan_test_pop_tx(f));
     TEST_ASSERT_EQ_U32(0x400u, f.id);
-    TEST_ASSERT_TRUE((f.data[7] & ems::app::STATUS_WBO2_FAULT) != 0u);
+    TEST_ASSERT_TRUE((f.data[36] & ems::app::STATUS_WBO2_FAULT) != 0u);
 
     // Injeta frame WBO2 e processa em t=20
-    ems::hal::CanFrame in = {};
-    in.id = 0x180u; in.dlc = 3u; in.extended = false;
+    ems::hal::FdcanFrame in = {};
+    in.id = 0x180u; in.dlc_bytes = 3u; in.extended = false; in.brs = false;
     in.data[0] = 0xE8u; in.data[1] = 0x03u; // 1000 = λ1.00
     in.data[2] = 0x01u;
-    ems::hal::can_test_inject_rx(in);
+    ems::hal::fdcan_test_inject_rx(in);
 
     ems::app::can_stack_process(20u, ckp, sensors, 0, 0u, 0, 0u, 0u, 0x00u);
-    while (ems::hal::can_test_pop_tx(f)) {
+    while (ems::hal::fdcan_test_pop_tx(f)) {
         if (f.id == 0x400u) { break; }
     }
     TEST_ASSERT_EQ_U32(0x400u, f.id);
-    // Sensor fresco → bit7 deve estar LIMPO
-    TEST_ASSERT_TRUE((f.data[7] & ems::app::STATUS_WBO2_FAULT) == 0u);
+    TEST_ASSERT_TRUE((f.data[36] & ems::app::STATUS_WBO2_FAULT) == 0u);
 }
 
 void test_status_bits_scheduler_flags_passthrough() {
@@ -225,20 +221,20 @@ void test_status_bits_scheduler_flags_passthrough() {
         ems::app::STATUS_SCHED_CLAMP);
 
     // Provide a fresh WBO2 frame so bit7 is not auto-forced.
-    ems::hal::CanFrame in = {};
-    in.id = 0x180u; in.dlc = 3u; in.extended = false;
+    ems::hal::FdcanFrame in = {};
+    in.id = 0x180u; in.dlc_bytes = 3u; in.extended = false; in.brs = false;
     in.data[0] = 0xE8u; in.data[1] = 0x03u;
     in.data[2] = 0x01u;
-    ems::hal::can_test_inject_rx(in);
+    ems::hal::fdcan_test_inject_rx(in);
 
     ems::app::can_stack_process(10u, ckp, sensors, 0, 0u, 0, 0u, 0u, status);
 
-    ems::hal::CanFrame f = {};
-    while (ems::hal::can_test_pop_tx(f)) {
+    ems::hal::FdcanFrame f = {};
+    while (ems::hal::fdcan_test_pop_tx(f)) {
         if (f.id == 0x400u) { break; }
     }
     TEST_ASSERT_EQ_U32(0x400u, f.id);
-    TEST_ASSERT_EQ_U32(status, f.data[7]);
+    TEST_ASSERT_EQ_U32(status, f.data[36]);
 }
 
 } // namespace
@@ -246,7 +242,7 @@ void test_status_bits_scheduler_flags_passthrough() {
 int main() {
     test_rx_ignores_non_wbo2_id();
     test_tx_0x400_serialization();
-    test_tx_0x401_serialization();
+    test_tx_0x400_carries_pressures_and_uptime();
     test_rx_wbo2_safe_lambda_and_timeout();
     test_status_bits_wbo2_fault_flag();
     test_status_bits_scheduler_flags_passthrough();

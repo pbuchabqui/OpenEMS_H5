@@ -1,0 +1,682 @@
+{
+  "project": {
+    "name": "OpenEMS_H5",
+    "description": "Engine Management System — 4-cylinder, 4-stroke",
+    "version": "2.2",
+    "language": "C++17",
+    "board": "WeAct STM32H5 64-PIN CoreBoard V1.1"
+  },
+
+  "mcu": {
+    "part_number": "STM32H562RGT6",
+    "package": "LQFP64",
+    "core": "Cortex-M33",
+    "fpu": true,
+    "clock_mhz": 250,
+    "apb1_mhz": 250,
+    "apb2_mhz": 250,
+    "flash_kb": 1024,
+    "flash_high_cycling_kb": 96,
+    "flash_high_cycling_endurance": 100000,
+    "sram_kb": 640,
+    "backup_sram_kb": 4,
+    "backup_sram_base": "0x38800000",
+    "icache_kb": 8,
+    "flash_wait_states": 5,
+    "accelerators": ["CORDIC", "FMAC", "GPDMA"]
+  },
+
+  "build": {
+    "framework": "stm32cube",
+    "toolchain": "GCC ARM 12+",
+    "platform": "PlatformIO",
+    "std": "c++17",
+    "flags": ["-O2", "-fno-exceptions", "-fno-rtti", "-fno-threadsafe-statics", "-Wall"],
+    "references": ["RusEFI", "Speeduino"]
+  },
+
+  "rules": {
+    "absolute": [
+      {
+        "id": "NO_DELAY",
+        "rule": "No delay()/millis()/micros() in real-time code",
+        "detail": "Use TIMx->CNT/CCR/SR directly. millis() allowed only in main loop background tasks >5ms."
+      },
+      {
+        "id": "NO_HEAP",
+        "rule": "No dynamic allocation after init",
+        "banned": ["new", "malloc", "std::vector", "std::string", "std::map"]
+      },
+      {
+        "id": "NO_HAL_IN_HAL",
+        "rule": "No HAL/LL in hal/* layer",
+        "detail": "Direct CMSIS register access only: TIM2->CCR1, ADC1->SQR1, GPIOA->BSRR. Exception: SystemClock_Config() may use HAL. CORDIC/FMAC: LL API allowed."
+      },
+      {
+        "id": "NO_FLOAT_ISR",
+        "rule": "No float in CKP/scheduler ISRs",
+        "detail": "ISR: uint32_t only. float allowed in engine/*. CORDIC q1.31/q1.15 is integer — allowed in ISR (29 deterministic cycles)."
+      }
+    ],
+    "timestamp_arithmetic": {
+      "width": 32,
+      "correct": "uint32_t delta = (uint32_t)(now - prev);",
+      "wrong": "if (now > prev) { delta = now - prev; }",
+      "rationale": "TIM2/TIM5 are 32-bit. Overflow at 17.18s @ 250 MHz. Circular subtraction works naturally.",
+      "reference": "RusEFI issue #1488 — ISR delay + 16-bit overflow = false gap. 32-bit eliminates this bug class entirely."
+    }
+  },
+
+  "optimizations": [
+    {"id": "OPT-1",  "name": "CKP 32-bit",          "peripheral": "TIM2",     "prompts": [1, 2],     "impact": "Eliminates overflow — entire bug class removed"},
+    {"id": "OPT-2",  "name": "Scheduler 32-bit",     "peripheral": "TIM5",     "prompts": [1, 3],     "impact": "Absolute timestamps, no per-tooth recalc"},
+    {"id": "OPT-3",  "name": "CORDIC sin/cos",       "peripheral": "CORDIC",   "prompts": [1, 5],     "impact": "Angles in 116ns, harmonic interpolation viable"},
+    {"id": "OPT-4",  "name": "FMAC filter",          "peripheral": "FMAC",     "prompts": [7],        "impact": "Autonomous knock filtering, zero CPU"},
+    {"id": "OPT-5",  "name": "DMA linked-list",      "peripheral": "GPDMA",    "prompts": [4],        "impact": "Fully autonomous ADC pipeline"},
+    {"id": "OPT-6",  "name": "ADC oversampling",     "peripheral": "ADC1/ADC2","prompts": [4],        "impact": "14-16 bit effective in hardware, zero CPU"},
+    {"id": "OPT-7",  "name": "BKIN emergency",       "peripheral": "TIM1/TIM8","prompts": [1, 11],    "impact": "Async shutdown, LOCK=2 anti-tamper"},
+    {"id": "OPT-8",  "name": "Timer sync ITR",       "peripheral": "TIM5→TIM1/TIM8", "prompts": [1, 3], "impact": "32→16 bit conversion by simple cast"},
+    {"id": "OPT-9",  "name": "ICACHE 8KB",           "peripheral": "ICACHE",   "prompts": [1, 11],    "impact": "ISR 4-5x faster, jitter reduced"},
+    {"id": "OPT-10", "name": "CAN-FD 64B",           "peripheral": "FDCAN1",   "prompts": [9],        "impact": "1 frame = full telemetry at 100Hz"},
+    {"id": "OPT-11", "name": "Backup SRAM",          "peripheral": "BKPSRAM",  "prompts": [10, 11],   "impact": "Crash log without flash wear"},
+    {"id": "OPT-12", "name": "LPTIM Stop mode",      "peripheral": "LPTIM1",   "prompts": [11],       "impact": "Monitoring at ~2µA with engine off"},
+    {"id": "OPT-13", "name": "DAC 12-bit knock",     "peripheral": "DAC1",     "prompts": [7],        "impact": "64x resolution vs MK64F CMP0 6-bit"}
+  ],
+
+  "pinout": {
+    "_source": "DS14258 Rev 6 Tables 15/16 + WeAct Schematic V1.1",
+    "_notes": [
+      "PA11/PA12 = USB Type-C (board hardware, fixed)",
+      "PA13/PA14 = SWD (board hardware, fixed)",
+      "MicroSD slot SACRIFICED — PC8/PC9/PC10/PC11/PC12/PD2 freed",
+      "PA8 has R12=10k pull-up (SD detect) — remove or accept",
+      "PA9/PA10 exposed on SWD header P5 (TX/RX) — no debugger while engine running",
+      "PB9/PB11 = VCAP (R7/R8 0Ω marked NC) — DO NOT USE",
+      "PB2 = BOOT1 + KEY K3 — DO NOT USE as GPIO output"
+    ],
+
+    "injection": [
+      {"function": "INJ1", "pin": "PA8",  "port": "A", "af": 1, "timer": "TIM1",  "channel": 1, "lqfp64_pin": 41, "weact_note": "R12 10k pull-up (SD detect), remove recommended"},
+      {"function": "INJ2", "pin": "PA9",  "port": "A", "af": 1, "timer": "TIM1",  "channel": 2, "lqfp64_pin": 42, "weact_note": "SWD header P5 TX — no debugger while running"},
+      {"function": "INJ3", "pin": "PA10", "port": "A", "af": 1, "timer": "TIM1",  "channel": 3, "lqfp64_pin": 43, "weact_note": "SWD header P5 RX — no debugger while running"},
+      {"function": "INJ4", "pin": "PC12", "port": "C", "af": 2, "timer": "TIM15", "channel": 1, "lqfp64_pin": 53, "weact_note": "Was MicroSD CMD. TIM15 synced via ITR."}
+    ],
+
+    "ignition": [
+      {"function": "IGN1", "pin": "PC6", "port": "C", "af": 3, "timer": "TIM8", "channel": 1, "lqfp64_pin": 37},
+      {"function": "IGN2", "pin": "PC7", "port": "C", "af": 3, "timer": "TIM8", "channel": 2, "lqfp64_pin": 38},
+      {"function": "IGN3", "pin": "PC8", "port": "C", "af": 3, "timer": "TIM8", "channel": 3, "lqfp64_pin": 39, "weact_note": "Was MicroSD DAT0"},
+      {"function": "IGN4", "pin": "PC9", "port": "C", "af": 3, "timer": "TIM8", "channel": 4, "lqfp64_pin": 40, "weact_note": "Was MicroSD DAT1"}
+    ],
+
+    "ckp_cmp": [
+      {"function": "CKP", "pin": "PA0", "port": "A", "af": 1, "timer": "TIM2", "channel": 1, "lqfp64_pin": 14, "mode": "input_capture", "bits": 32, "tick_ns": 4, "overflow_s": 17.18},
+      {"function": "CMP", "pin": "PA1", "port": "A", "af": 1, "timer": "TIM2", "channel": 2, "lqfp64_pin": 15, "mode": "input_capture", "bits": 32}
+    ],
+
+    "scheduler_timebase": {
+      "timer": "TIM5", "bits": 32, "psc": 0, "arr": "0xFFFFFFFF", "tick_ns": 4,
+      "sync": {"master": "TIM5", "slaves": ["TIM1", "TIM8", "TIM15"], "mechanism": "ITR", "slave_mode": "reset"}
+    },
+
+    "pwm_aux": [
+      {"function": "IACV",      "pin": "PB0",  "port": "B", "af": 2, "timer": "TIM3",  "channel": 3, "lqfp64_pin": 26, "default_freq_hz": 125},
+      {"function": "Wastegate", "pin": "PB1",  "port": "B", "af": 2, "timer": "TIM3",  "channel": 4, "lqfp64_pin": 27, "default_freq_hz": 150},
+      {"function": "VVT_Esc",   "pin": "PB14", "port": "B", "af": 2, "timer": "TIM12", "channel": 1, "lqfp64_pin": 35, "default_freq_hz": 150},
+      {"function": "VVT_Adm",   "pin": "PB15", "port": "B", "af": 2, "timer": "TIM12", "channel": 2, "lqfp64_pin": 36, "default_freq_hz": 150}
+    ],
+
+    "usb": [
+      {"function": "USB_DN",  "pin": "PA11", "lqfp64_pin": 44, "note": "USB CDC for TunerStudio — board hardware fixed"},
+      {"function": "USB_DP",  "pin": "PA12", "lqfp64_pin": 45, "note": "USB CDC for TunerStudio — board hardware fixed"}
+    ],
+
+    "fdcan": [
+      {"function": "FDCAN1_TX", "pin": "PB7", "port": "B", "af": 9, "lqfp64_pin": 59},
+      {"function": "FDCAN1_RX", "pin": "PB8", "port": "B", "af": 9, "lqfp64_pin": 61}
+    ],
+
+    "debug_uart": [
+      {"function": "USART3_TX", "pin": "PC10", "port": "C", "af": 7, "lqfp64_pin": 51, "baud": 115200, "weact_note": "Was MicroSD CLK"},
+      {"function": "USART3_RX", "pin": "PC11", "port": "C", "af": 7, "lqfp64_pin": 52, "weact_note": "Was MicroSD D3/CD"}
+    ],
+
+    "bkin": [
+      {"function": "TIM1_BKIN", "pin": "PB12", "port": "B", "af": 1, "lqfp64_pin": 33, "protects": ["INJ1","INJ2","INJ3","INJ4"]},
+      {"function": "TIM8_BKIN", "pin": "PA6",  "port": "A", "af": 3, "lqfp64_pin": 21, "protects": ["IGN1","IGN2","IGN3","IGN4"]}
+    ],
+
+    "dac": [
+      {"function": "knock_threshold", "pin": "PA5", "port": "A", "af": 0, "peripheral": "DAC1_OUT2", "lqfp64_pin": 21, "resolution_bits": 12}
+    ],
+
+    "adc": [
+      {"function": "MAP",        "pin": "PC0", "port": "C", "adc": "ADC1", "lqfp64_pin": 8,  "oversampling": 64, "effective_bits": 16, "dma": true,  "rate": "12x/rev"},
+      {"function": "TPS",        "pin": "PC2", "port": "C", "adc": "ADC1", "lqfp64_pin": 10, "oversampling": 16, "effective_bits": 14, "dma": true,  "rate": "12x/rev"},
+      {"function": "O2_narrow",  "pin": "PA4", "port": "A", "adc": "ADC1", "lqfp64_pin": 20, "oversampling": 16, "effective_bits": 14, "dma": true,  "rate": "12x/rev"},
+      {"function": "CLT",        "pin": "PC4", "port": "C", "adc": "ADC2", "lqfp64_pin": 24, "oversampling": 16, "effective_bits": 14, "dma": false, "rate": "1x/100ms"},
+      {"function": "IAT",        "pin": "PC5", "port": "C", "adc": "ADC2", "lqfp64_pin": 25, "oversampling": 16, "effective_bits": 14, "dma": false, "rate": "1x/100ms"},
+      {"function": "fuel_press", "pin": "PA2", "port": "A", "adc": "ADC2", "lqfp64_pin": 16, "oversampling": 16, "effective_bits": 14, "dma": false, "rate": "1x/50ms"},
+      {"function": "oil_press",  "pin": "PA3", "port": "A", "adc": "ADC2", "lqfp64_pin": 17, "oversampling": 16, "effective_bits": 14, "dma": false, "rate": "1x/50ms"}
+    ],
+
+    "gpio": [
+      {"function": "Fan",    "pin": "PB3",  "port": "B", "mode": "push_pull", "lqfp64_pin": 55},
+      {"function": "Bomba",  "pin": "PB10", "port": "B", "mode": "push_pull", "lqfp64_pin": 29},
+      {"function": "LED",    "pin": "PC13", "port": "C", "mode": "push_pull", "lqfp64_pin": 2, "weact_note": "Blue LED D1 already soldered, active low via 5.1k R1"}
+    ],
+
+    "free_pins": ["PA7", "PA15", "PB4", "PB5", "PB6", "PB13", "PC1", "PC3", "PD2"],
+    "do_not_use": ["PB2", "PB9", "PB11", "PA11", "PA12", "PA13", "PA14"]
+  },
+
+  "rcc_clock_gating": {
+    "APB2ENR":  ["TIM1EN", "TIM8EN", "TIM15EN"],
+    "APB1ENR1": ["TIM2EN", "TIM3EN", "TIM5EN", "TIM6EN", "TIM7EN", "TIM12EN", "DAC1EN", "USART3EN"],
+    "AHB2ENR":  ["GPIOAEN", "GPIOBEN", "GPIOCEN", "ADC12EN"],
+    "AHB1ENR":  ["CORDICEN", "FMACEN", "GPDMA1EN"]
+  },
+
+  "timers": {
+    "TIM2":  {"type": "GP",       "bits": 32, "psc": 0, "arr": "0xFFFFFFFF", "function": "CKP/CMP input capture",  "irq": "TIM2_IRQHandler",           "priority": 1},
+    "TIM5":  {"type": "GP",       "bits": 32, "psc": 0, "arr": "0xFFFFFFFF", "function": "Scheduler timebase",     "irq": null,                        "priority": 2},
+    "TIM1":  {"type": "Advanced", "bits": 16, "psc": 0, "arr": "0xFFFF",     "function": "INJ1-3 output compare",  "irq": "TIM1_CC_IRQHandler",        "priority": 4, "bkin_pin": "PB12", "bkin_af": 1, "bdtr": {"MOE": 1, "BKE": 1, "BKP": 0, "AOE": 0, "LOCK": 2}},
+    "TIM15": {"type": "GP",       "bits": 16, "psc": 0, "arr": "0xFFFF",     "function": "INJ4 output compare",    "irq": "TIM1_BRK_TIM15_IRQHandler", "priority": 4, "note": "Shared IRQ with TIM1_BRK — check flags in ISR"},
+    "TIM8":  {"type": "Advanced", "bits": 16, "psc": 0, "arr": "0xFFFF",     "function": "IGN1-4 output compare",  "irq": "TIM8_CC_IRQHandler",        "priority": 4, "bkin_pin": "PA6",  "bkin_af": 3, "bdtr": {"MOE": 1, "BKE": 1, "BKP": 0, "AOE": 0, "LOCK": 2}},
+    "TIM3":  {"type": "GP",       "bits": 16, "psc": "auto", "function": "IACV/WG PWM (CH3/CH4)",                   "irq": null,                        "priority": 8},
+    "TIM12": {"type": "GP",       "bits": 16, "psc": "auto", "function": "VVT PWM",                                 "irq": null,                        "priority": 8},
+    "TIM6":  {"type": "Basic",    "bits": 16, "function": "Datalog timestamp 1MHz",                                  "irq": "TIM6_DAC_IRQHandler",       "priority": 12},
+    "TIM7":  {"type": "Basic",    "bits": 16, "function": "Software watchdog 100ms",                                 "irq": "TIM7_IRQHandler",           "priority": 11},
+    "LPTIM1":{"type": "LP",       "bits": 16, "clock": "LSE 32.768kHz", "function": "Stop mode monitoring 1s wakeup","irq": "LPTIM1_IRQHandler",         "priority": 10}
+  },
+
+  "interfaces": {
+    "ckp_snapshot": {
+      "namespace": "ems::drv",
+      "header": "ems/drv/ckp.h",
+      "structs": {
+        "SyncState": {"type": "enum class", "underlying": "uint8_t", "values": ["WAIT", "SYNCING", "SYNCED"]},
+        "CkpSnapshot": {
+          "fields": [
+            {"name": "tooth_period_ticks", "type": "uint32_t", "doc": "Period in TIM2 ticks (4ns each)"},
+            {"name": "tooth_index",        "type": "uint16_t", "doc": "0..57 (0 = first tooth after gap)"},
+            {"name": "last_tim2_capture",  "type": "uint32_t", "doc": "Raw 32-bit TIM2->CCR1"},
+            {"name": "rpm_x10",            "type": "uint32_t", "doc": "RPM x 10 integer"},
+            {"name": "state",              "type": "SyncState"},
+            {"name": "phase_A",            "type": "bool",     "doc": "true = 1st revolution of 720° cycle"}
+          ]
+        }
+      },
+      "functions": [
+        {"name": "ckp_snapshot",       "returns": "CkpSnapshot", "params": [],                                              "noexcept": true},
+        {"name": "ckp_angle_to_ticks", "returns": "uint32_t",    "params": [{"name":"angle_x10","type":"uint16_t"}, {"name":"ref_capture","type":"uint32_t"}], "noexcept": true}
+      ],
+      "rpm_formula": "rpm_x10 = (uint32_t)(1500000000000ULL / (58ULL * tooth_period_ticks))"
+    },
+
+    "scheduler": {
+      "namespace": "ems::drv",
+      "header": "ems/drv/scheduler.h",
+      "enums": {
+        "Channel": {"type": "enum class", "underlying": "uint8_t", "values": {
+          "INJ1": {"value": 0, "timer": "TIM1",  "channel": 1, "gpio_port": "A", "gpio_pin": 8},
+          "INJ2": {"value": 1, "timer": "TIM1",  "channel": 2, "gpio_port": "A", "gpio_pin": 9},
+          "INJ3": {"value": 2, "timer": "TIM1",  "channel": 3, "gpio_port": "A", "gpio_pin": 10},
+          "INJ4": {"value": 3, "timer": "TIM15", "channel": 1, "gpio_port": "C", "gpio_pin": 12},
+          "IGN1": {"value": 4, "timer": "TIM8",  "channel": 1, "gpio_port": "C", "gpio_pin": 6},
+          "IGN2": {"value": 5, "timer": "TIM8",  "channel": 2, "gpio_port": "C", "gpio_pin": 7},
+          "IGN3": {"value": 6, "timer": "TIM8",  "channel": 3, "gpio_port": "C", "gpio_pin": 8},
+          "IGN4": {"value": 7, "timer": "TIM8",  "channel": 4, "gpio_port": "C", "gpio_pin": 9}
+        }},
+        "Action": {"type": "enum class", "underlying": "uint8_t", "values": ["SET", "CLEAR"]}
+      },
+      "functions": [
+        {"name": "sched_event",      "returns": "bool", "params": [{"name":"ch","type":"Channel"}, {"name":"abs_ticks","type":"uint32_t"}, {"name":"act","type":"Action"}], "noexcept": true, "doc": "abs_ticks is 32-bit absolute (TIM5). Internally converts to 16-bit for TIM1/TIM8/TIM15."},
+        {"name": "sched_cancel",     "returns": "void", "params": [{"name":"ch","type":"Channel"}], "noexcept": true},
+        {"name": "sched_cancel_all", "returns": "void", "params": [], "noexcept": true},
+        {"name": "sched_isr_tim1",   "returns": "void", "params": [], "noexcept": true, "doc": "Called by TIM1_CC_IRQHandler (INJ1-3)"},
+        {"name": "sched_isr_tim15",  "returns": "void", "params": [], "noexcept": true, "doc": "Called by TIM1_BRK_TIM15_IRQHandler (INJ4)"},
+        {"name": "sched_isr_tim8",   "returns": "void", "params": [], "noexcept": true, "doc": "Called by TIM8_CC_IRQHandler (IGN1-4)"},
+        {"name": "sched_recalc",     "returns": "void", "params": [{"name":"snap","type":"const CkpSnapshot&"}], "noexcept": true, "doc": "NOP in v2.2 — absolute timestamps don't need recalc"}
+      ],
+      "timer_routing": "if (ch <= INJ3) → TIM1; else if (ch == INJ4) → TIM15; else → TIM8;",
+      "conversion_32_to_16": "uint16_t hw = (uint16_t)(abs_ticks); // works because TIM1/TIM8/TIM15 synced via ITR"
+    },
+
+    "sensors": {
+      "namespace": "ems::drv",
+      "header": "ems/drv/sensors.h",
+      "structs": {
+        "SensorData": {
+          "fields": [
+            {"name": "map_kpa_x10",       "type": "uint16_t", "range": "0..2500",  "doc": "0..250.0 kPa"},
+            {"name": "maf_gps_x100",      "type": "uint16_t", "doc": "g/s x 100"},
+            {"name": "tps_pct_x10",       "type": "uint16_t", "range": "0..1000",  "doc": "0..100.0%"},
+            {"name": "clt_degc_x10",      "type": "int16_t",  "range": "-400..1500"},
+            {"name": "iat_degc_x10",      "type": "int16_t"},
+            {"name": "o2_mv",             "type": "uint16_t", "range": "0..1000",  "doc": "raw 0..1000 mV"},
+            {"name": "fuel_press_kpa_x10","type": "uint16_t"},
+            {"name": "oil_press_kpa_x10", "type": "uint16_t"},
+            {"name": "vbatt_mv",          "type": "uint16_t"},
+            {"name": "fault_bits",        "type": "uint8_t",  "doc": "bit per sensor, 0=ok"}
+          ]
+        }
+      },
+      "functions": [
+        {"name": "sensors_get", "returns": "const SensorData&", "params": [], "noexcept": true}
+      ]
+    },
+
+    "cordic": {
+      "namespace": "ems::hal",
+      "header": "ems/hal/cordic.h",
+      "functions": [
+        {"name": "cordic_init", "returns": "void", "params": []},
+        {"name": "cordic_sincos_q31",  "returns": "void", "params": [{"name":"angle_q31","type":"int32_t"}, {"name":"sin_out","type":"int32_t*"}, {"name":"cos_out","type":"int32_t*"}], "noexcept": true, "doc": "Input: q1.31 [-1,+1] = [-π,+π]. Output: sin/cos in q1.31. 29 cycles."},
+        {"name": "cordic_sincos_deg",  "returns": "void", "params": [{"name":"angle_deg_x10","type":"uint16_t"}, {"name":"sin_out","type":"int16_t*"}, {"name":"cos_out","type":"int16_t*"}], "noexcept": true, "doc": "Input: degrees x10 (0..3600). Output: sin/cos in q1.15 (±32767)."}
+      ],
+      "register_config": {
+        "CSR": "FUNC=0001(cosine), PRECISION=6(24 iterations), NRES=1(2 results), NARGS=1, ARGSIZE=0(32-bit), RESSIZE=0(32-bit)",
+        "usage": "CORDIC->WDATA = angle_q31; while(!(CORDIC->CSR & RRDY)); cos=CORDIC->RDATA; sin=CORDIC->RDATA;"
+      },
+      "deg_to_q31": "angle_q31 = (int32_t)(((int64_t)angle_deg_x10 * 11930465LL) / 10)"
+    },
+
+    "hal_tim": {
+      "namespace": "ems::hal",
+      "header": "ems/hal/tim.h",
+      "functions": [
+        {"name": "icache_init",      "returns": "void"},
+        {"name": "tim2_init",        "returns": "void", "doc": "32-bit CKP input capture"},
+        {"name": "tim5_init",        "returns": "void", "doc": "32-bit scheduler timebase"},
+        {"name": "tim1_init",        "returns": "void", "doc": "INJ1-3 output compare + BKIN"},
+        {"name": "tim8_init",        "returns": "void", "doc": "IGN1-4 output compare + BKIN"},
+        {"name": "tim15_init",       "returns": "void", "doc": "INJ4 output compare (PC12) synced via ITR"},
+        {"name": "tim3_pwm_init",    "returns": "void", "params": [{"name":"freq_hz","type":"uint32_t"}], "doc": "IACV/WG PWM CH3/CH4"},
+        {"name": "tim12_pwm_init",   "returns": "void", "params": [{"name":"freq_hz","type":"uint32_t"}], "doc": "VVT PWM"},
+        {"name": "tim2_count",       "returns": "uint32_t", "noexcept": true, "doc": "32-bit"},
+        {"name": "tim5_count",       "returns": "uint32_t", "noexcept": true, "doc": "32-bit"},
+        {"name": "tim1_set_compare", "returns": "void", "params": [{"name":"ch","type":"uint8_t"}, {"name":"ticks","type":"uint16_t"}], "noexcept": true},
+        {"name": "tim8_set_compare", "returns": "void", "params": [{"name":"ch","type":"uint8_t"}, {"name":"ticks","type":"uint16_t"}], "noexcept": true},
+        {"name": "tim15_set_compare","returns": "void", "params": [{"name":"ticks","type":"uint16_t"}], "noexcept": true, "doc": "Single channel INJ4"},
+        {"name": "tim1_clear_ccf",   "returns": "void", "params": [{"name":"ch","type":"uint8_t"}], "noexcept": true},
+        {"name": "tim8_clear_ccf",   "returns": "void", "params": [{"name":"ch","type":"uint8_t"}], "noexcept": true},
+        {"name": "tim15_clear_ccf",  "returns": "void", "noexcept": true},
+        {"name": "tim3_set_duty",    "returns": "void", "params": [{"name":"ch","type":"uint8_t"}, {"name":"duty_pct_x10","type":"uint16_t"}], "noexcept": true, "doc": "CH3=IACV, CH4=WG"},
+        {"name": "tim12_set_duty",   "returns": "void", "params": [{"name":"ch","type":"uint8_t"}, {"name":"duty_pct_x10","type":"uint16_t"}], "noexcept": true},
+        {"name": "bkin_rearm_tim1",  "returns": "void", "noexcept": true, "doc": "Re-enable MOE after fault cleared"},
+        {"name": "bkin_rearm_tim8",  "returns": "void", "noexcept": true}
+      ],
+      "irq_handlers": [
+        {"name": "TIM1_CC_IRQHandler",          "doc": "INJ1-3 output compare"},
+        {"name": "TIM8_CC_IRQHandler",          "doc": "IGN1-4 output compare"},
+        {"name": "TIM1_BRK_TIM15_IRQHandler",   "doc": "TIM15 INJ4 shares vector with TIM1_BRK — check flags"},
+        {"name": "TIM2_IRQHandler",             "doc": "CKP input capture"}
+      ]
+    },
+
+    "flash_nvm": {
+      "namespace": "ems::hal",
+      "header": "ems/hal/flash_nvm.h",
+      "functions": [
+        {"name": "flash_nvm_init",      "returns": "void"},
+        {"name": "nvm_write_ltft",      "returns": "bool", "params": [{"name":"rpm_i","type":"uint8_t"}, {"name":"load_i","type":"uint8_t"}, {"name":"val","type":"int8_t"}]},
+        {"name": "nvm_read_ltft",       "returns": "int8_t", "params": [{"name":"rpm_i","type":"uint8_t"}, {"name":"load_i","type":"uint8_t"}]},
+        {"name": "nvm_save_calibration","returns": "bool", "params": [{"name":"page","type":"uint8_t"}, {"name":"data","type":"const uint8_t*"}, {"name":"len","type":"uint16_t"}]},
+        {"name": "nvm_load_calibration","returns": "bool", "params": [{"name":"page","type":"uint8_t"}, {"name":"data","type":"uint8_t*"}, {"name":"len","type":"uint16_t"}]},
+        {"name": "bkpsram_write_crash", "returns": "void", "params": [{"name":"s","type":"const SensorData&"}, {"name":"ckp","type":"const CkpSnapshot&"}]},
+        {"name": "bkpsram_read_crash",  "returns": "bool", "params": [{"name":"s","type":"SensorData&"}, {"name":"ckp","type":"CkpSnapshot&"}]},
+        {"name": "bkpsram_boot_count",  "returns": "uint32_t"}
+      ],
+      "backup_sram_layout": {
+        "base": "0x38800000",
+        "size_bytes": 4096,
+        "regions": [
+          {"offset": "0x000", "size": 4,   "name": "magic",        "value": "0xDEADBEEF"},
+          {"offset": "0x004", "size": 4,   "name": "boot_count"},
+          {"offset": "0x008", "size": 248, "name": "crash_log"},
+          {"offset": "0x100", "size": 256, "name": "freeze_frame"},
+          {"offset": "0x200", "size": 512, "name": "reserved"}
+        ]
+      }
+    }
+  },
+
+  "trigger_wheel": {
+    "type": "60-2",
+    "physical_teeth": 60,
+    "missing_teeth": 2,
+    "real_teeth_per_rev": 58,
+    "tooth_angle_x1000": 6207,
+    "gap_threshold": 1.5,
+    "anti_false_gap_min_teeth": 55,
+    "sync_gaps_required": 2,
+    "engine_type": "4-stroke",
+    "cycle_degrees": 720,
+    "revolutions_per_cycle": 2
+  },
+
+  "engine": {
+    "cylinders": 4,
+    "firing_order": [1, 3, 4, 2],
+    "cylinder_offset_deg": [0, 180, 540, 360],
+    "tables": {
+      "ve_table":    {"size": [16, 16], "type": "uint8_t",  "axes": {"rpm_x10": [500,750,1000,1250,1500,2000,2500,3000,4000,5000,6000,7000,8000,9000,10000,12000], "map_kpa": [20,30,40,50,60,70,80,90,100,110,120,130,140,150,175,200]}},
+      "spark_table": {"size": [16, 16], "type": "int8_t",   "doc": "offset -40 (value 0 = -40°, 100 = 60°)"},
+      "interpolation": "bilinear integer shift-8 (Speeduino table3D pattern)"
+    },
+    "fuel": {
+      "formula": "pw_us = (req_fuel_us × ve × map_kpa) / (255 × map_ref_kpa)",
+      "corrections": ["corr_clt", "corr_iat", "corr_vbatt", "corr_warmup"],
+      "final": "pw_final_us = (pw_us × corr_clt × corr_iat) / (256 × 256) + dead_time_us",
+      "ticks_conversion": "pw_ticks = pw_final_us * 250"
+    },
+    "ignition": {
+      "advance_clamp_deg": [-10, 55],
+      "dwell_angle_formula": "dwell_angle_x10 = (dwell_ms × rpm × 360 × 10) / 60000"
+    },
+    "knock": {
+      "window_deg": [10, 90],
+      "threshold_bits": 12,
+      "threshold_levels": 4096,
+      "retard_increment_deg": 2.0,
+      "retard_max_deg": 10.0,
+      "recovery_decrement_deg": 0.1,
+      "recovery_clean_cycles": 10,
+      "adaptive_increment_cycles": 100
+    }
+  },
+
+  "can_fd": {
+    "peripheral": "FDCAN1",
+    "arbitration_kbps": 500,
+    "data_mbps": 2,
+    "brs": true,
+    "fifo_depth": 3,
+    "dma_support": false,
+    "tx_frames": [
+      {
+        "id": "0x400",
+        "period_ms": 10,
+        "dlc_bytes": 48,
+        "fields": [
+          {"offset": 0,  "size": 2, "name": "rpm",             "type": "uint16_t"},
+          {"offset": 2,  "size": 2, "name": "map_kpa_x10",     "type": "uint16_t"},
+          {"offset": 4,  "size": 2, "name": "tps_pct_x10",     "type": "uint16_t"},
+          {"offset": 6,  "size": 2, "name": "clt_degc_x10",    "type": "int16_t"},
+          {"offset": 8,  "size": 2, "name": "iat_degc_x10",    "type": "int16_t"},
+          {"offset": 10, "size": 2, "name": "advance_x10",     "type": "int16_t"},
+          {"offset": 12, "size": 2, "name": "pw_us",           "type": "uint16_t"},
+          {"offset": 14, "size": 2, "name": "lambda_x1000",    "type": "uint16_t"},
+          {"offset": 16, "size": 2, "name": "stft_pct_x10",    "type": "int16_t"},
+          {"offset": 18, "size": 2, "name": "fuel_press_x10",  "type": "uint16_t"},
+          {"offset": 20, "size": 2, "name": "oil_press_x10",   "type": "uint16_t"},
+          {"offset": 22, "size": 2, "name": "vbatt_mv",        "type": "uint16_t"},
+          {"offset": 24, "size": 4, "name": "abs_crank_angle",  "type": "uint32_t"},
+          {"offset": 28, "size": 4, "name": "ckp_period_ticks", "type": "uint32_t"},
+          {"offset": 32, "size": 4, "name": "knock_retard_x10", "type": "uint8_t[4]"},
+          {"offset": 36, "size": 1, "name": "status_bits",      "type": "uint8_t"},
+          {"offset": 37, "size": 1, "name": "fault_bits",       "type": "uint8_t"},
+          {"offset": 38, "size": 4, "name": "uptime_ms",        "type": "uint32_t"},
+          {"offset": 42, "size": 6, "name": "reserved",         "type": "uint8_t[6]"}
+        ]
+      }
+    ],
+    "rx_frames": [
+      {"id": "0x180", "name": "wideband_o2", "timeout_ms": 500, "fallback": "ADC O2 narrow"}
+    ]
+  },
+
+  "tuner_studio": {
+    "transport": "USB CDC ACM",
+    "protocol": "MS Serial Protocol v3",
+    "commands": {
+      "Q": {"response": "OpenEMS_v2.2\\0", "doc": "Signature"},
+      "S": {"response": "firmware version string"},
+      "r": {"params": "page_num offset length", "doc": "Read calibration page"},
+      "w": {"params": "page_num offset length [data]", "doc": "Write calibration page"},
+      "A": {"response_size": 64, "doc": "Realtime data struct"}
+    },
+    "pages": {
+      "0x00": {"name": "config_general", "size": 512},
+      "0x01": {"name": "ve_table",       "size": 256},
+      "0x02": {"name": "spark_table",    "size": 256},
+      "0x03": {"name": "realtime_data",  "size": 64, "read_only": true}
+    }
+  },
+
+  "prompts": [
+    {
+      "id": 1,
+      "name": "HAL: Timers + ICACHE + BKIN + Sync + CORDIC",
+      "layer": "hal",
+      "depends_on": [],
+      "deliverables": [
+        {"path": "src/hal/tim.h",               "type": "header"},
+        {"path": "src/hal/tim.cpp",             "type": "source"},
+        {"path": "src/hal/cordic.h",            "type": "header"},
+        {"path": "src/hal/cordic.cpp",          "type": "source"},
+        {"path": "test/hal/test_tim_32bit.cpp", "type": "test"},
+        {"path": "test/hal/test_cordic.cpp",    "type": "test"}
+      ],
+      "acceptance": [
+        "TIM2/TIM5 32-bit no overflow",
+        "TIM1↔TIM8↔TIM15 sync via ITR",
+        "BKIN active and LOCK=2",
+        "ICACHE enabled",
+        "CORDIC sin(90°)→32767±1, cos(0°)→32767±1, latency ≤29 cycles"
+      ]
+    },
+    {
+      "id": 2,
+      "name": "DRIVER: CKP Decoder 60-2",
+      "layer": "drv",
+      "depends_on": [1],
+      "deliverables": [
+        {"path": "src/drv/ckp.h",           "type": "header"},
+        {"path": "src/drv/ckp.cpp",         "type": "source"},
+        {"path": "test/drv/test_ckp.cpp",   "type": "test"}
+      ],
+      "acceptance": [
+        "Sync in ≤2 revolutions",
+        "False gap rejected (tooth_count < 55)",
+        "RPM correct",
+        "32-bit capture no overflow",
+        "Capture wrap 0xFFFFFF00→0x100 correct"
+      ]
+    },
+    {
+      "id": 3,
+      "name": "DRIVER: Event Scheduler",
+      "layer": "drv",
+      "depends_on": [1, 2],
+      "deliverables": [
+        {"path": "src/drv/scheduler.h",           "type": "header"},
+        {"path": "src/drv/scheduler.cpp",         "type": "source"},
+        {"path": "test/drv/test_scheduler.cpp",   "type": "test"}
+      ],
+      "acceptance": [
+        "Events executed in order",
+        "Cancel clean",
+        "Past event rejected",
+        "32-bit abs_ticks → 16-bit compare correct",
+        "All 3 timers (TIM1/TIM15/TIM8) operational"
+      ]
+    },
+    {
+      "id": 4,
+      "name": "DRIVER: Sensor Pipeline",
+      "layer": "drv",
+      "depends_on": [1, 2],
+      "deliverables": [
+        {"path": "src/hal/adc.h",              "type": "header"},
+        {"path": "src/hal/adc.cpp",            "type": "source"},
+        {"path": "src/drv/sensors.h",          "type": "header"},
+        {"path": "src/drv/sensors.cpp",        "type": "source"},
+        {"path": "test/drv/test_sensors.cpp",  "type": "test"}
+      ],
+      "acceptance": [
+        "Values in correct engineering units",
+        "Fault after 3 out-of-range samples",
+        "ADC oversampling x16 returns >4095",
+        "DMA circular functional"
+      ]
+    },
+    {
+      "id": 5,
+      "name": "ENGINE: Fuel + Ignition",
+      "layer": "engine",
+      "depends_on": [1, 2, 3, 4],
+      "deliverables": [
+        {"path": "src/engine/table3d.h",        "type": "header"},
+        {"path": "src/engine/table3d.cpp",      "type": "source"},
+        {"path": "src/engine/fuel_calc.h",      "type": "header"},
+        {"path": "src/engine/fuel_calc.cpp",    "type": "source"},
+        {"path": "src/engine/ign_calc.h",       "type": "header"},
+        {"path": "src/engine/ign_calc.cpp",     "type": "source"},
+        {"path": "test/engine/test_fuel.cpp",   "type": "test"},
+        {"path": "test/engine/test_ign.cpp",    "type": "test"}
+      ],
+      "acceptance": [
+        "PW calculated ±2% of manual value",
+        "AE fires on threshold",
+        "Dwell start > spark angle",
+        "Clamp -10°/+55° applied",
+        "CORDIC angle conversion used"
+      ]
+    },
+    {
+      "id": 6,
+      "name": "ENGINE: Auxiliaries (IACV, Boost, VVT, Fan, Pump)",
+      "layer": "engine",
+      "depends_on": [1, 2, 3, 4],
+      "deliverables": [
+        {"path": "src/engine/auxiliaries.h",       "type": "header"},
+        {"path": "src/engine/auxiliaries.cpp",     "type": "source"},
+        {"path": "test/engine/test_iacv.cpp",      "type": "test"}
+      ],
+      "acceptance": ["IACV PID no oscillation on step input"]
+    },
+    {
+      "id": 7,
+      "name": "ENGINE: Knock Control (DAC + FMAC)",
+      "layer": "engine",
+      "depends_on": [1, 2, 3, 4],
+      "deliverables": [
+        {"path": "src/hal/dac.h",              "type": "header"},
+        {"path": "src/hal/dac.cpp",            "type": "source"},
+        {"path": "src/engine/knock.h",         "type": "header"},
+        {"path": "src/engine/knock.cpp",       "type": "source"},
+        {"path": "test/engine/test_knock.cpp", "type": "test"}
+      ],
+      "acceptance": [
+        "Retard applied after threshold",
+        "Recovery correct",
+        "DAC 12-bit linear output",
+        "FMAC filter convergent"
+      ]
+    },
+    {
+      "id": 8,
+      "name": "APP: TunerStudio Protocol (USB CDC)",
+      "layer": "app",
+      "depends_on": [1, 4],
+      "deliverables": [
+        {"path": "src/hal/usb_cdc.h",               "type": "header"},
+        {"path": "src/hal/usb_cdc.cpp",             "type": "source"},
+        {"path": "src/app/tuner_studio.h",          "type": "header"},
+        {"path": "src/app/tuner_studio.cpp",        "type": "source"},
+        {"path": "test/app/test_ts_protocol.cpp",   "type": "test"}
+      ],
+      "acceptance": ["Frames r/w/A correct byte-by-byte vs Speeduino reference"]
+    },
+    {
+      "id": 9,
+      "name": "APP: CAN-FD Stack",
+      "layer": "app",
+      "depends_on": [1, 4],
+      "deliverables": [
+        {"path": "src/hal/fdcan.h",            "type": "header"},
+        {"path": "src/hal/fdcan.cpp",          "type": "source"},
+        {"path": "src/app/can_stack.h",        "type": "header"},
+        {"path": "src/app/can_stack.cpp",      "type": "source"},
+        {"path": "test/app/test_can.cpp",      "type": "test"}
+      ],
+      "acceptance": [
+        "CAN-FD 48-byte frame decodable",
+        "BRS functional",
+        "RX FIFO serviced before overflow"
+      ]
+    },
+    {
+      "id": 10,
+      "name": "HAL: Flash Persistence + Backup SRAM",
+      "layer": "hal",
+      "depends_on": [],
+      "deliverables": [
+        {"path": "src/hal/flash_nvm.h",          "type": "header"},
+        {"path": "src/hal/flash_nvm.cpp",        "type": "source"},
+        {"path": "test/hal/test_flash_nvm.cpp",  "type": "test"}
+      ],
+      "acceptance": [
+        "LTFT survives power cycle",
+        "No corruption after 1000 writes",
+        "Wear-leveling functional",
+        "Backup SRAM crash log functional"
+      ]
+    },
+    {
+      "id": 11,
+      "name": "Main Loop + Integration",
+      "layer": "app",
+      "depends_on": [1,2,3,4,5,6,7,8,9,10],
+      "deliverables": [
+        {"path": "src/main.cpp",      "type": "source"},
+        {"path": "platformio.ini",    "type": "config"}
+      ],
+      "init_sequence": [
+        "SystemClock_Config(): HSE → PLL1 → 250 MHz",
+        "icache_init()",
+        "RCC clock gating: all peripherals",
+        "tim2_init(), tim5_init(), tim1_init(), tim15_init(), tim8_init(), tim3_pwm_init(125), tim12_pwm_init(150)",
+        "cordic_init()",
+        "adc_init() with GPDMA + oversampling",
+        "dac_init()",
+        "fdcan_init(), usb_cdc_init(), usart3_init()",
+        "flash_nvm_init() → load calibration + read crash log",
+        "ckp_init(), sched_init(), sensors_init()",
+        "fuel_init(), ign_init(), aux_init(), knock_init()",
+        "ts_init(), can_stack_init()",
+        "NVIC priorities",
+        "Wait for state == SYNCED"
+      ],
+      "main_loop_tasks": [
+        {"period_ms": 5,   "task": "fuel_calc + ign_calc → sched_event(abs_ticks 32-bit)"},
+        {"period_ms": 10,  "task": "IACV PID, VVT PID, Boost PID"},
+        {"period_ms": 20,  "task": "Process TunerStudio RX buffer"},
+        {"period_ms": 50,  "task": "Transmit CAN-FD 0x400 (48 bytes)"},
+        {"period_ms": 100, "task": "Update LTFT if conditions met"},
+        {"period_ms": 500, "task": "Flush calibration to flash if dirty"},
+        {"event": "fault", "task": "bkpsram_write_crash()"}
+      ],
+      "nvic_priorities": {
+        "TIM2 (CKP)": 1,
+        "TIM5": 2,
+        "TIM1_CC (INJ1-3)": 4,
+        "TIM1_BRK_TIM15 (INJ4)": 4,
+        "TIM8_CC (IGN)": 4,
+        "ADC1/2": 5,
+        "FDCAN1_IT0": 6,
+        "TIM7 (watchdog)": 11,
+        "TIM6 (datalog)": 12
+      },
+      "acceptance": [
+        "Sync < 3 rev cranking",
+        "ICACHE hit rate > 90%",
+        "LPTIM wakeup functional",
+        "BKIN tested",
+        "TIM7 watchdog kicking"
+      ]
+    }
+  ]
+}

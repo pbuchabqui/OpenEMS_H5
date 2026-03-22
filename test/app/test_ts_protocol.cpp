@@ -9,14 +9,14 @@
 
 namespace ems::drv {
 
-static CkpSnapshot g_ckp = {0u, 0u, 0u, 0u, SyncState::WAIT_GAP, false};
+static CkpSnapshot g_ckp = {0u, 0u, 0u, 0u, SyncState::WAIT, false};
 static SensorData g_sensors = {0u, 0u, 0u, 0, 0, 0u, 0u, 0u, 0u, 0u};
 
 CkpSnapshot ckp_snapshot() noexcept {
     return g_ckp;
 }
 
-SensorData sensors_get() noexcept {
+const SensorData& sensors_get() noexcept {
     return g_sensors;
 }
 
@@ -47,7 +47,7 @@ int g_tests_failed = 0;
 
 void ts_send_bytewise(const uint8_t* frame, uint16_t len) {
     for (uint16_t i = 0u; i < len; ++i) {
-        ems::app::ts_uart0_rx_isr_byte(frame[i]);
+        ems::app::ts_rx_byte(frame[i]);
         ems::app::ts_process();
     }
 }
@@ -69,7 +69,7 @@ void test_q_returns_signature_cstr() {
 
     uint8_t out[32] = {};
     const uint16_t n = ts_drain(out, sizeof(out));
-    const char exp[] = "OpenEMS_v1.1";
+    const char exp[] = "OpenEMS_v2.2";
     TEST_ASSERT_EQ_U32(std::strlen(exp), n);
     TEST_ASSERT_TRUE(std::memcmp(out, exp, std::strlen(exp)) == 0);
 }
@@ -115,7 +115,7 @@ void test_a_returns_64_bytes_realtime() {
         0u,
         0u,
         12340u,
-        ems::drv::SyncState::FULL_SYNC,
+        ems::drv::SyncState::SYNCED,
         true,
     };
     ems::drv::g_sensors = ems::drv::SensorData{
@@ -124,11 +124,11 @@ void test_a_returns_64_bytes_realtime() {
         321u,  // tps_pct_x10
         850,   // clt_degc_x10
         250,   // iat_degc_x10
-        // o2_mv REMOVIDO
         0u,    // fuel_press_kpa_x10
         0u,    // oil_press_kpa_x10
         0u,    // vbatt_mv
         1u,    // fault_bits
+        0u,    // o2_mv
     };
 
     const uint8_t cmd = static_cast<uint8_t>('A');
@@ -164,7 +164,7 @@ void test_a_packs_scheduler_diag_in_reserved() {
         0u,
         0u,
         0u,
-        ems::drv::SyncState::WAIT_GAP,
+        ems::drv::SyncState::WAIT,
         false,
     };
     ems::drv::g_sensors = ems::drv::SensorData{
@@ -240,7 +240,7 @@ void test_h_returns_signature() {
 
     uint8_t out[32] = {};
     const uint16_t n = ts_drain(out, sizeof(out));
-    const char exp[] = "OpenEMS_v1.1";
+    const char exp[] = "OpenEMS_v2.2";
     TEST_ASSERT_EQ_U32(std::strlen(exp), n);
     TEST_ASSERT_TRUE(std::memcmp(out, exp, std::strlen(exp)) == 0);
 }
@@ -282,7 +282,7 @@ void test_f_returns_protocol_version_cstr() {
 
     uint8_t out[16] = {};
     const uint16_t n = ts_drain(out, sizeof(out));
-    const char exp[] = "001";
+    const char exp[] = "003";
     TEST_ASSERT_EQ_U32(std::strlen(exp), n);
     TEST_ASSERT_TRUE(std::memcmp(out, exp, std::strlen(exp)) == 0);
 }

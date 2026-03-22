@@ -53,16 +53,16 @@ int g_tests_failed = 0;
 ems::drv::CkpSnapshot g_snap    = {};
 ems::drv::SensorData  g_sensors = {};
 
-uint16_t g_ftm1_duty[2] = {};
-uint16_t g_ftm2_duty[2] = {};
+uint16_t g_tim3_duty[2] = {};
+uint16_t g_tim12_duty[2] = {};
 
 void reset_fixture(int16_t clt_x10, uint32_t rpm_x10) {
     g_snap = ems::drv::CkpSnapshot{
-        500000u,                          // tooth_period_ns
+        31250u,                           // tooth_period_ticks (@ 16 ns/tick)
         8u,                               // tooth_index
-        0u,                               // last_ftm3_capture
+        0u,                               // last_tim2_capture
         static_cast<uint32_t>(rpm_x10),  // rpm_x10 (uint32_t)
-        ems::drv::SyncState::FULL_SYNC,
+        ems::drv::SyncState::SYNCED,
         true                              // phase_A
     };
     g_sensors = ems::drv::SensorData{
@@ -71,23 +71,23 @@ void reset_fixture(int16_t clt_x10, uint32_t rpm_x10) {
         0u,      // tps_pct_x10
         clt_x10, // clt_degc_x10
         250,     // iat_degc_x10
-        // o2_mv REMOVIDO
         0u,      // fuel_press_kpa_x10
         0u,      // oil_press_kpa_x10
         13500u,  // vbatt_mv
         0u,      // fault_bits
+        0u,      // o2_mv
         0u,      // an1_raw
         0u,      // an2_raw
         0u,      // an3_raw
         0u,      // an4_raw
     };
-    g_ftm1_duty[0] = g_ftm1_duty[1] = 0u;
-    g_ftm2_duty[0] = g_ftm2_duty[1] = 0u;
+    g_tim3_duty[0] = g_tim3_duty[1] = 0u;
+    g_tim12_duty[0] = g_tim12_duty[1] = 0u;
     ems::engine::auxiliaries_init();
     ems::engine::auxiliaries_set_key_on(true);
 }
 
-uint16_t iac_duty() { return g_ftm1_duty[0]; }
+uint16_t iac_duty() { return g_tim3_duty[0]; }
 
 inline int32_t abs32(int32_t x) { return x < 0 ? -x : x; }
 
@@ -351,14 +351,14 @@ void test_warmup_table_interpolation() {
 
 namespace ems::drv {
 CkpSnapshot       ckp_snapshot() noexcept { return g_snap; }
-SensorData sensors_get() noexcept  { return g_sensors; }
+const SensorData& sensors_get() noexcept  { return g_sensors; }
 }
 
 namespace ems::hal {
-void ftm1_pwm_init(uint32_t) noexcept {}
-void ftm2_pwm_init(uint32_t) noexcept {}
-void ftm1_set_duty(uint8_t ch, uint16_t d) noexcept { if (ch < 2u) g_ftm1_duty[ch] = d; }
-void ftm2_set_duty(uint8_t ch, uint16_t d) noexcept { if (ch < 2u) g_ftm2_duty[ch] = d; }
+void tim3_pwm_init(uint32_t) noexcept {}
+void tim12_pwm_init(uint32_t) noexcept {}
+void tim3_set_duty(uint8_t ch, uint16_t d) noexcept { if (ch < 2u) g_tim3_duty[ch] = d; }
+void tim12_set_duty(uint8_t ch, uint16_t d) noexcept { if (ch < 2u) g_tim12_duty[ch] = d; }
 }
 
 // ─── main ─────────────────────────────────────────────────────────────────────

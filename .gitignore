@@ -1,1 +1,3 @@
-firmware_extracted/
+firmware_extracted/ 
+build/
+test_tim32

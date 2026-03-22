@@ -19,36 +19,36 @@ int g_tests_failed = 0;
     } \
 } while (0)
 
-ems::drv::CkpSnapshot g_snap = {1000000u, 0u, 0u, 3000u, ems::drv::SyncState::FULL_SYNC, true};
+ems::drv::CkpSnapshot g_snap = {62500u, 0u, 0u, 3000u, ems::drv::SyncState::SYNCED, true};
 ems::drv::SensorData g_sensors = {
     1000u,   // map_kpa_x10
     0u,      // maf_gps_x100
     700u,    // tps_pct_x10
     900,     // clt_degc_x10
     250,     // iat_degc_x10
-    // o2_mv REMOVIDO
     3000u,   // fuel_press_kpa_x10
     2500u,   // oil_press_kpa_x10
     13500u,  // vbatt_mv
     0u,      // fault_bits
+    0u,      // o2_mv
 };
 
-uint32_t g_ftm1_init_hz = 0u;
-uint32_t g_ftm2_init_hz = 0u;
-uint16_t g_ftm1_duty[2] = {0u, 0u};
-uint16_t g_ftm2_duty[2] = {0u, 0u};
+uint32_t g_tim3_init_hz = 0u;
+uint32_t g_tim12_init_hz = 0u;
+uint16_t g_tim3_duty[2] = {0u, 0u};
+uint16_t g_tim12_duty[2] = {0u, 0u};
 
 void reset_fixture() {
-    g_snap = ems::drv::CkpSnapshot{1000000u, 8u, 0u, 3000u, ems::drv::SyncState::FULL_SYNC, true};
+    g_snap = ems::drv::CkpSnapshot{62500u, 8u, 0u, 3000u, ems::drv::SyncState::SYNCED, true};
     g_sensors = ems::drv::SensorData{
-        1000u, 0u, 700u, 900, 250, 3000u, 2500u, 13500u, 0u,
+        1000u, 0u, 700u, 900, 250, 3000u, 2500u, 13500u, 0u, 0u,
     };
-    g_ftm1_init_hz = 0u;
-    g_ftm2_init_hz = 0u;
-    g_ftm1_duty[0] = 0u;
-    g_ftm1_duty[1] = 0u;
-    g_ftm2_duty[0] = 0u;
-    g_ftm2_duty[1] = 0u;
+    g_tim3_init_hz = 0u;
+    g_tim12_init_hz = 0u;
+    g_tim3_duty[0] = 0u;
+    g_tim3_duty[1] = 0u;
+    g_tim12_duty[0] = 0u;
+    g_tim12_duty[1] = 0u;
 }
 
 }  // namespace
@@ -58,29 +58,29 @@ CkpSnapshot ckp_snapshot() noexcept {
     return g_snap;
 }
 
-SensorData sensors_get() noexcept {
+const SensorData& sensors_get() noexcept {
     return g_sensors;
 }
 }  // namespace ems::drv
 
 namespace ems::hal {
-void ftm1_pwm_init(uint32_t freq_hz) {
-    g_ftm1_init_hz = freq_hz;
+void tim3_pwm_init(uint32_t freq_hz) {
+    g_tim3_init_hz = freq_hz;
 }
 
-void ftm2_pwm_init(uint32_t freq_hz) {
-    g_ftm2_init_hz = freq_hz;
+void tim12_pwm_init(uint32_t freq_hz) {
+    g_tim12_init_hz = freq_hz;
 }
 
-void ftm1_set_duty(uint8_t ch, uint16_t duty_pct_x10) noexcept {
+void tim3_set_duty(uint8_t ch, uint16_t duty_pct_x10) noexcept {
     if (ch < 2u) {
-        g_ftm1_duty[ch] = duty_pct_x10;
+        g_tim3_duty[ch] = duty_pct_x10;
     }
 }
 
-void ftm2_set_duty(uint8_t ch, uint16_t duty_pct_x10) noexcept {
+void tim12_set_duty(uint8_t ch, uint16_t duty_pct_x10) noexcept {
     if (ch < 2u) {
-        g_ftm2_duty[ch] = duty_pct_x10;
+        g_tim12_duty[ch] = duty_pct_x10;
     }
 }
 }  // namespace ems::hal
@@ -91,8 +91,8 @@ void test_pwm_init_strategy() {
     reset_fixture();
     ems::engine::auxiliaries_init();
 
-    TEST_ASSERT_TRUE(g_ftm1_init_hz == 15u);
-    TEST_ASSERT_TRUE(g_ftm2_init_hz == 15u);
+    TEST_ASSERT_TRUE(g_tim3_init_hz == 15u);
+    TEST_ASSERT_TRUE(g_tim12_init_hz == 15u);
 }
 
 void test_wastegate_overboost_failsafe_after_500ms() {
@@ -121,7 +121,7 @@ void test_vvt_failsafe_when_no_phase_confirm_for_200ms() {
 
     g_sensors.map_kpa_x10 = 1000u;
     g_snap.rpm_x10 = 3500u;
-    g_snap.state = ems::drv::SyncState::FULL_SYNC;
+    g_snap.state = ems::drv::SyncState::SYNCED;
     g_snap.phase_A = true;
 
     ems::engine::auxiliaries_tick_10ms();

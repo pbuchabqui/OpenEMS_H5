@@ -3,8 +3,9 @@
  * @file hal/stm32h562/regs.h
  * @brief Definições de registradores do STM32H562RGT6 (ARM Cortex-M33 @ 250 MHz)
  *
- * Cobertura: RCC, GPIO, TIM1/TIM3/TIM4/TIM5/TIM6, ADC1/ADC2, FDCAN1,
- *            USART1, IWDG, SysTick (via CMSIS), Flash OPTCR/SR, NVIC helpers.
+ * Cobertura: RCC, GPIO, TIM1/TIM2/TIM3/TIM5/TIM6/TIM8/TIM12/TIM15, ADC1/ADC2,
+ *            FDCAN1, CORDIC, USART1, IWDG, SysTick (via CMSIS), Flash OPTCR/SR,
+ *            NVIC helpers.
  *
  * Todos os endereços baseados em:
  *   RM0481 — STM32H562/H563/H573 Reference Manual Rev 2 (ST Microelectronics)
@@ -26,19 +27,24 @@
 
 // APB2
 #define TIM1_BASE    0x40012C00UL
+#define TIM8_BASE    0x40013400UL
+#define TIM15_BASE   0x40014000UL
 #define USART1_BASE  0x40013800UL
 
 // APB1
+#define TIM2_BASE    0x40000000UL
 #define TIM3_BASE    0x40000400UL
-#define TIM4_BASE    0x40000800UL
 #define TIM5_BASE    0x40000C00UL
 #define TIM6_BASE    0x40001000UL
+#define TIM12_BASE   0x40001800UL
 #define USART2_BASE  0x40004400UL
 
 // AHB1
 #define ADC1_BASE    0x42028000UL
 #define ADC2_BASE    0x42028100UL
 #define ADC12_COMMON 0x42028300UL
+#define CORDIC_BASE  0x46020C00UL
+#define USB_OTG_FS_BASE 0x50000000UL
 
 // APB1 — FDCAN
 #define FDCAN1_BASE  0x4000A400UL
@@ -81,6 +87,8 @@
 #define RCC_CR_HSERDY   (1u << 17)
 #define RCC_CR_PLL1ON   (1u << 24)
 #define RCC_CR_PLL1RDY  (1u << 25)
+#define RCC_CR_HSI48ON  (1u << 26)
+#define RCC_CR_HSI48RDY (1u << 27)
 
 // RCC_CFGR1 bits (SW[2:0] / SWS[2:0])
 #define RCC_CFGR1_SW_PLL1  (3u << 0)
@@ -93,15 +101,20 @@
 #define RCC_AHB2ENR1_GPIODEN  (1u << 3)
 #define RCC_AHB2ENR1_GPIOEEN  (1u << 4)
 #define RCC_AHB1ENR_ADC12EN   (1u << 5)
+#define RCC_AHB1ENR_CORDICEN  (1u << 14)
+#define RCC_AHB1ENR_USBOTGFSEN (1u << 26)
+#define RCC_APB1LENR_TIM2EN   (1u << 0)
 #define RCC_APB1LENR_TIM3EN   (1u << 1)
-#define RCC_APB1LENR_TIM4EN   (1u << 2)
 #define RCC_APB1LENR_TIM5EN   (1u << 3)
 #define RCC_APB1LENR_TIM6EN   (1u << 4)
+#define RCC_APB1LENR_TIM12EN  (1u << 6)
 #define RCC_APB1LENR_FDCAN1EN (1u << 9)
 #define RCC_APB1LENR_USART2EN (1u << 17)
 #define RCC_APB1LENR_IWDGEN   (1u << 12)
 #define RCC_APB2ENR_TIM1EN    (1u << 11)
+#define RCC_APB2ENR_TIM8EN    (1u << 13)
 #define RCC_APB2ENR_USART1EN  (1u << 14)
+#define RCC_APB2ENR_TIM15EN   (1u << 16)
 
 // ─── GPIO (RM0481 §17) ────────────────────────────────────────────────────────
 // Offsets comuns a GPIOA..GPIOE
@@ -126,6 +139,11 @@
 #define GPIOB_AFRL    STM32_REG32(GPIOB_BASE + GPIO_AFRL_OFF)
 #define GPIOB_AFRH    STM32_REG32(GPIOB_BASE + GPIO_AFRH_OFF)
 
+#define GPIOC_MODER   STM32_REG32(GPIOC_BASE + GPIO_MODER_OFF)
+#define GPIOC_OSPEEDR STM32_REG32(GPIOC_BASE + GPIO_OSPEEDR_OFF)
+#define GPIOC_AFRL    STM32_REG32(GPIOC_BASE + GPIO_AFRL_OFF)
+#define GPIOC_AFRH    STM32_REG32(GPIOC_BASE + GPIO_AFRH_OFF)
+
 #define GPIOE_MODER   STM32_REG32(GPIOE_BASE + GPIO_MODER_OFF)
 #define GPIOE_OSPEEDR STM32_REG32(GPIOE_BASE + GPIO_OSPEEDR_OFF)
 #define GPIOE_AFRH    STM32_REG32(GPIOE_BASE + GPIO_AFRH_OFF)
@@ -148,8 +166,10 @@
 //   AF9  = FDCAN1/FDCAN2
 #define GPIO_AF1   1u
 #define GPIO_AF2   2u
+#define GPIO_AF3   3u
 #define GPIO_AF7   7u
 #define GPIO_AF9   9u
+#define GPIO_AF10  10u
 
 // Inline: configura pino como AF
 static inline void gpio_set_af(volatile uint32_t* moder,
@@ -247,8 +267,25 @@ static inline void gpio_set_analog(volatile uint32_t* moder, uint8_t pin) noexce
 #define TIM_CCER_CC3E   (1u << 8)
 #define TIM_CCER_CC4E   (1u << 12)
 
-// TIM5 — 32-bit free-running counter (CKP input capture)
+// TIM2 — 32-bit capture timer (CKP/CMP)
+#define TIM2_CR1   STM32_REG32(TIM2_BASE + TIM_CR1_OFF)
+#define TIM2_CR2   STM32_REG32(TIM2_BASE + TIM_CR2_OFF)
+#define TIM2_SMCR  STM32_REG32(TIM2_BASE + TIM_SMCR_OFF)
+#define TIM2_DIER  STM32_REG32(TIM2_BASE + TIM_DIER_OFF)
+#define TIM2_SR    STM32_REG32(TIM2_BASE + TIM_SR_OFF)
+#define TIM2_EGR   STM32_REG32(TIM2_BASE + TIM_EGR_OFF)
+#define TIM2_CCMR1 STM32_REG32(TIM2_BASE + TIM_CCMR1_OFF)
+#define TIM2_CCER  STM32_REG32(TIM2_BASE + TIM_CCER_OFF)
+#define TIM2_CNT   STM32_REG32(TIM2_BASE + TIM_CNT_OFF)
+#define TIM2_PSC   STM32_REG32(TIM2_BASE + TIM_PSC_OFF)
+#define TIM2_ARR   STM32_REG32(TIM2_BASE + TIM_ARR_OFF)
+#define TIM2_CCR1  STM32_REG32(TIM2_BASE + TIM_CCR1_OFF)
+#define TIM2_CCR2  STM32_REG32(TIM2_BASE + TIM_CCR2_OFF)
+
+// TIM5 — 32-bit free-running scheduler timebase
 #define TIM5_CR1   STM32_REG32(TIM5_BASE + TIM_CR1_OFF)
+#define TIM5_CR2   STM32_REG32(TIM5_BASE + TIM_CR2_OFF)
+#define TIM5_SMCR  STM32_REG32(TIM5_BASE + TIM_SMCR_OFF)
 #define TIM5_DIER  STM32_REG32(TIM5_BASE + TIM_DIER_OFF)
 #define TIM5_SR    STM32_REG32(TIM5_BASE + TIM_SR_OFF)
 #define TIM5_CCMR1 STM32_REG32(TIM5_BASE + TIM_CCMR1_OFF)
@@ -256,12 +293,11 @@ static inline void gpio_set_analog(volatile uint32_t* moder, uint8_t pin) noexce
 #define TIM5_CNT   STM32_REG32(TIM5_BASE + TIM_CNT_OFF)
 #define TIM5_PSC   STM32_REG32(TIM5_BASE + TIM_PSC_OFF)
 #define TIM5_ARR   STM32_REG32(TIM5_BASE + TIM_ARR_OFF)
-#define TIM5_CCR1  STM32_REG32(TIM5_BASE + TIM_CCR1_OFF)  // CKP timestamp travado
-#define TIM5_CCR2  STM32_REG32(TIM5_BASE + TIM_CCR2_OFF)  // CMP timestamp travado
 #define TIM5_EGR   STM32_REG32(TIM5_BASE + TIM_EGR_OFF)
 
 // TIM1 — advanced timer (output compare ignição/injeção)
 #define TIM1_CR1   STM32_REG32(TIM1_BASE + TIM_CR1_OFF)
+#define TIM1_SMCR  STM32_REG32(TIM1_BASE + TIM_SMCR_OFF)
 #define TIM1_DIER  STM32_REG32(TIM1_BASE + TIM_DIER_OFF)
 #define TIM1_SR    STM32_REG32(TIM1_BASE + TIM_SR_OFF)
 #define TIM1_EGR   STM32_REG32(TIM1_BASE + TIM_EGR_OFF)
@@ -277,10 +313,43 @@ static inline void gpio_set_analog(volatile uint32_t* moder, uint8_t pin) noexce
 #define TIM1_CCR4  STM32_REG32(TIM1_BASE + TIM_CCR4_OFF)
 #define TIM1_BDTR  STM32_REG32(TIM1_BASE + TIM_BDTR_OFF)
 
-// TIM3 — PWM (IACV CH1 + Wastegate CH2)
+// TIM8 — advanced timer (IGN1-4)
+#define TIM8_CR1   STM32_REG32(TIM8_BASE + TIM_CR1_OFF)
+#define TIM8_SMCR  STM32_REG32(TIM8_BASE + TIM_SMCR_OFF)
+#define TIM8_DIER  STM32_REG32(TIM8_BASE + TIM_DIER_OFF)
+#define TIM8_SR    STM32_REG32(TIM8_BASE + TIM_SR_OFF)
+#define TIM8_EGR   STM32_REG32(TIM8_BASE + TIM_EGR_OFF)
+#define TIM8_CCMR1 STM32_REG32(TIM8_BASE + TIM_CCMR1_OFF)
+#define TIM8_CCMR2 STM32_REG32(TIM8_BASE + TIM_CCMR2_OFF)
+#define TIM8_CCER  STM32_REG32(TIM8_BASE + TIM_CCER_OFF)
+#define TIM8_CNT   STM32_REG32(TIM8_BASE + TIM_CNT_OFF)
+#define TIM8_PSC   STM32_REG32(TIM8_BASE + TIM_PSC_OFF)
+#define TIM8_ARR   STM32_REG32(TIM8_BASE + TIM_ARR_OFF)
+#define TIM8_CCR1  STM32_REG32(TIM8_BASE + TIM_CCR1_OFF)
+#define TIM8_CCR2  STM32_REG32(TIM8_BASE + TIM_CCR2_OFF)
+#define TIM8_CCR3  STM32_REG32(TIM8_BASE + TIM_CCR3_OFF)
+#define TIM8_CCR4  STM32_REG32(TIM8_BASE + TIM_CCR4_OFF)
+#define TIM8_BDTR  STM32_REG32(TIM8_BASE + TIM_BDTR_OFF)
+
+// TIM15 — general purpose compare timer (INJ4)
+#define TIM15_CR1   STM32_REG32(TIM15_BASE + TIM_CR1_OFF)
+#define TIM15_SMCR  STM32_REG32(TIM15_BASE + TIM_SMCR_OFF)
+#define TIM15_DIER  STM32_REG32(TIM15_BASE + TIM_DIER_OFF)
+#define TIM15_SR    STM32_REG32(TIM15_BASE + TIM_SR_OFF)
+#define TIM15_EGR   STM32_REG32(TIM15_BASE + TIM_EGR_OFF)
+#define TIM15_CCMR1 STM32_REG32(TIM15_BASE + TIM_CCMR1_OFF)
+#define TIM15_CCER  STM32_REG32(TIM15_BASE + TIM_CCER_OFF)
+#define TIM15_CNT   STM32_REG32(TIM15_BASE + TIM_CNT_OFF)
+#define TIM15_PSC   STM32_REG32(TIM15_BASE + TIM_PSC_OFF)
+#define TIM15_ARR   STM32_REG32(TIM15_BASE + TIM_ARR_OFF)
+#define TIM15_CCR1  STM32_REG32(TIM15_BASE + TIM_CCR1_OFF)
+#define TIM15_BDTR  STM32_REG32(TIM15_BASE + TIM_BDTR_OFF)
+
+// TIM3 — PWM (IACV CH3 + Wastegate CH4)
 #define TIM3_CR1   STM32_REG32(TIM3_BASE + TIM_CR1_OFF)
 #define TIM3_CR2   STM32_REG32(TIM3_BASE + TIM_CR2_OFF)
 #define TIM3_SR    STM32_REG32(TIM3_BASE + TIM_SR_OFF)
+#define TIM3_CCMR2 STM32_REG32(TIM3_BASE + TIM_CCMR2_OFF)
 #define TIM3_CCMR1 STM32_REG32(TIM3_BASE + TIM_CCMR1_OFF)
 #define TIM3_CCER  STM32_REG32(TIM3_BASE + TIM_CCER_OFF)
 #define TIM3_CNT   STM32_REG32(TIM3_BASE + TIM_CNT_OFF)
@@ -288,20 +357,22 @@ static inline void gpio_set_analog(volatile uint32_t* moder, uint8_t pin) noexce
 #define TIM3_ARR   STM32_REG32(TIM3_BASE + TIM_ARR_OFF)
 #define TIM3_CCR1  STM32_REG32(TIM3_BASE + TIM_CCR1_OFF)
 #define TIM3_CCR2  STM32_REG32(TIM3_BASE + TIM_CCR2_OFF)
+#define TIM3_CCR3  STM32_REG32(TIM3_BASE + TIM_CCR3_OFF)
+#define TIM3_CCR4  STM32_REG32(TIM3_BASE + TIM_CCR4_OFF)
 #define TIM3_EGR   STM32_REG32(TIM3_BASE + TIM_EGR_OFF)
 
-// TIM4 — PWM (VVT Exhaust CH1 + VVT Intake CH2)
-#define TIM4_CR1   STM32_REG32(TIM4_BASE + TIM_CR1_OFF)
-#define TIM4_CR2   STM32_REG32(TIM4_BASE + TIM_CR2_OFF)
-#define TIM4_SR    STM32_REG32(TIM4_BASE + TIM_SR_OFF)
-#define TIM4_CCMR1 STM32_REG32(TIM4_BASE + TIM_CCMR1_OFF)
-#define TIM4_CCER  STM32_REG32(TIM4_BASE + TIM_CCER_OFF)
-#define TIM4_CNT   STM32_REG32(TIM4_BASE + TIM_CNT_OFF)
-#define TIM4_PSC   STM32_REG32(TIM4_BASE + TIM_PSC_OFF)
-#define TIM4_ARR   STM32_REG32(TIM4_BASE + TIM_ARR_OFF)
-#define TIM4_CCR1  STM32_REG32(TIM4_BASE + TIM_CCR1_OFF)
-#define TIM4_CCR2  STM32_REG32(TIM4_BASE + TIM_CCR2_OFF)
-#define TIM4_EGR   STM32_REG32(TIM4_BASE + TIM_EGR_OFF)
+// TIM12 — PWM (VVT Exhaust CH1 + VVT Intake CH2)
+#define TIM12_CR1   STM32_REG32(TIM12_BASE + TIM_CR1_OFF)
+#define TIM12_CR2   STM32_REG32(TIM12_BASE + TIM_CR2_OFF)
+#define TIM12_SR    STM32_REG32(TIM12_BASE + TIM_SR_OFF)
+#define TIM12_CCMR1 STM32_REG32(TIM12_BASE + TIM_CCMR1_OFF)
+#define TIM12_CCER  STM32_REG32(TIM12_BASE + TIM_CCER_OFF)
+#define TIM12_CNT   STM32_REG32(TIM12_BASE + TIM_CNT_OFF)
+#define TIM12_PSC   STM32_REG32(TIM12_BASE + TIM_PSC_OFF)
+#define TIM12_ARR   STM32_REG32(TIM12_BASE + TIM_ARR_OFF)
+#define TIM12_CCR1  STM32_REG32(TIM12_BASE + TIM_CCR1_OFF)
+#define TIM12_CCR2  STM32_REG32(TIM12_BASE + TIM_CCR2_OFF)
+#define TIM12_EGR   STM32_REG32(TIM12_BASE + TIM_EGR_OFF)
 
 // TIM6 — basic timer (ADC TRGO trigger)
 #define TIM6_CR1   STM32_REG32(TIM6_BASE + TIM_CR1_OFF)
@@ -453,7 +524,7 @@ static inline void gpio_set_analog(volatile uint32_t* moder, uint8_t pin) noexce
 #define USART2_RDR STM32_REG32(USART2_BASE + USART_RDR_OFF)
 #define USART2_TDR STM32_REG32(USART2_BASE + USART_TDR_OFF)
 
-// USART3 — TunerStudio UART (PB10=TX, PB11=RX, AF7) — PA2/PA3 livres para ADC1 MAP/MAF
+// USART3 — debug serial (PB10=TX, PB11=RX, AF7)
 #define USART3_BASE  0x40004800UL
 #define RCC_APB1LENR_USART3EN  (1u << 18)
 #define USART3_CR1 STM32_REG32(USART3_BASE + USART_CR1_OFF)
@@ -475,6 +546,76 @@ static inline void gpio_set_analog(volatile uint32_t* moder, uint8_t pin) noexce
 #define USART_ISR_RXNE  (1u << 5)   // RX not empty (data available)
 #define USART_ISR_TC    (1u << 6)   // Transmission complete
 #define USART_ISR_TXE   (1u << 7)   // TX register empty
+
+// ─── CORDIC (RM0481 §34) ─────────────────────────────────────────────────────
+#define CORDIC_CSR_OFF    0x000UL
+#define CORDIC_WDATA_OFF  0x004UL
+#define CORDIC_RDATA_OFF  0x008UL
+
+#define CORDIC_CSR    STM32_REG32(CORDIC_BASE + CORDIC_CSR_OFF)
+#define CORDIC_WDATA  STM32_REG32(CORDIC_BASE + CORDIC_WDATA_OFF)
+#define CORDIC_RDATA  STM32_REG32(CORDIC_BASE + CORDIC_RDATA_OFF)
+
+#define CORDIC_CSR_FUNC_COSINE     (1u << 0)
+#define CORDIC_CSR_PRECISION_24CYC (6u << 4)
+#define CORDIC_CSR_NARGS_1         (0u << 8)
+#define CORDIC_CSR_NRES_2          (1u << 9)
+#define CORDIC_CSR_ARGSIZE_32BIT   (0u << 10)
+#define CORDIC_CSR_RESSIZE_32BIT   (0u << 11)
+#define CORDIC_CSR_RRDY            (1u << 31)
+
+// ─── USB OTG FS ──────────────────────────────────────────────────────────────
+#define USB_OTG_GAHBCFG   STM32_REG32(USB_OTG_FS_BASE + 0x008UL)
+#define USB_OTG_GUSBCFG   STM32_REG32(USB_OTG_FS_BASE + 0x00CUL)
+#define USB_OTG_GRSTCTL   STM32_REG32(USB_OTG_FS_BASE + 0x010UL)
+#define USB_OTG_GINTSTS   STM32_REG32(USB_OTG_FS_BASE + 0x014UL)
+#define USB_OTG_GINTMSK   STM32_REG32(USB_OTG_FS_BASE + 0x018UL)
+#define USB_OTG_GRXSTSP   STM32_REG32(USB_OTG_FS_BASE + 0x020UL)
+#define USB_OTG_GRXFSIZ   STM32_REG32(USB_OTG_FS_BASE + 0x024UL)
+#define USB_OTG_DIEPTXF0  STM32_REG32(USB_OTG_FS_BASE + 0x028UL)
+#define USB_OTG_DIEPTXF1  STM32_REG32(USB_OTG_FS_BASE + 0x104UL)
+#define USB_OTG_DCFG      STM32_REG32(USB_OTG_FS_BASE + 0x800UL)
+#define USB_OTG_DCTL      STM32_REG32(USB_OTG_FS_BASE + 0x804UL)
+#define USB_OTG_DAINTMSK  STM32_REG32(USB_OTG_FS_BASE + 0x81CUL)
+#define USB_OTG_DIEPMSK   STM32_REG32(USB_OTG_FS_BASE + 0x810UL)
+#define USB_OTG_DOEPMSK   STM32_REG32(USB_OTG_FS_BASE + 0x814UL)
+#define USB_OTG_DIEPCTL0  STM32_REG32(USB_OTG_FS_BASE + 0x900UL)
+#define USB_OTG_DIEPINT0  STM32_REG32(USB_OTG_FS_BASE + 0x908UL)
+#define USB_OTG_DIEPTSIZ0 STM32_REG32(USB_OTG_FS_BASE + 0x910UL)
+#define USB_OTG_DIEPCTL1  STM32_REG32(USB_OTG_FS_BASE + 0x920UL)
+#define USB_OTG_DIEPINT1  STM32_REG32(USB_OTG_FS_BASE + 0x928UL)
+#define USB_OTG_DIEPTSIZ1 STM32_REG32(USB_OTG_FS_BASE + 0x930UL)
+#define USB_OTG_DOEPCTL0  STM32_REG32(USB_OTG_FS_BASE + 0xB00UL)
+#define USB_OTG_DOEPINT0  STM32_REG32(USB_OTG_FS_BASE + 0xB08UL)
+#define USB_OTG_DOEPTSIZ0 STM32_REG32(USB_OTG_FS_BASE + 0xB10UL)
+#define USB_OTG_DOEPCTL1  STM32_REG32(USB_OTG_FS_BASE + 0xB20UL)
+#define USB_OTG_DOEPINT1  STM32_REG32(USB_OTG_FS_BASE + 0xB28UL)
+#define USB_OTG_DOEPTSIZ1 STM32_REG32(USB_OTG_FS_BASE + 0xB30UL)
+#define USB_OTG_FIFO0     STM32_REG32(USB_OTG_FS_BASE + 0x1000UL)
+#define USB_OTG_FIFO1     STM32_REG32(USB_OTG_FS_BASE + 0x2000UL)
+
+#define USB_OTG_GAHBCFG_GINT        (1u << 0)
+#define USB_OTG_GUSBCFG_FDMOD       (1u << 30)
+#define USB_OTG_GRSTCTL_CSRST       (1u << 0)
+#define USB_OTG_GRSTCTL_AHBIDL      (1u << 31)
+#define USB_OTG_GINTSTS_USBSUSP     (1u << 11)
+#define USB_OTG_GINTSTS_USBRST      (1u << 12)
+#define USB_OTG_GINTSTS_ENUMDNE     (1u << 13)
+#define USB_OTG_GINTSTS_RXFLVL      (1u << 4)
+#define USB_OTG_GINTSTS_IEPINT      (1u << 18)
+#define USB_OTG_GINTSTS_OEPINT      (1u << 19)
+#define USB_OTG_DCFG_DSPD_FS        (3u << 0)
+#define USB_OTG_DCTL_SDIS           (1u << 1)
+#define USB_OTG_DIEPCTL_USBAEP      (1u << 15)
+#define USB_OTG_DIEPCTL_EPENA       (1u << 31)
+#define USB_OTG_DIEPCTL_CNAK        (1u << 26)
+#define USB_OTG_DOEPCTL_USBAEP      (1u << 15)
+#define USB_OTG_DOEPCTL_EPENA       (1u << 31)
+#define USB_OTG_DOEPCTL_CNAK        (1u << 26)
+#define USB_OTG_DOEPCTL_STALL       (1u << 21)
+#define USB_OTG_DIEPINT_XFRC        (1u << 0)
+#define USB_OTG_DOEPINT_XFRC        (1u << 0)
+#define USB_OTG_DOEPINT_STUP        (1u << 3)
 
 // ─── IWDG (Independent Watchdog, RM0481 §35) ─────────────────────────────────
 #define IWDG_KR_OFF   0x00UL
@@ -596,11 +737,13 @@ static inline void nvic_set_priority(uint8_t irq, uint8_t prio) noexcept {
 
 // IRQ numbers — STM32H562 (RM0481 §Table 87 / cmsis-device-h5 stm32h562xx.h)
 // Valores confirmados contra TIM5_IRQn=48, TIM1_CC_IRQn=44, etc.
-#define IRQ_TIM5         48u   // TIM5 global (CKP input capture)
-#define IRQ_TIM1_CC      44u   // TIM1 capture/compare (ignição/injeção)
-#define IRQ_TIM3         46u   // TIM3 (PWM IACV/wastegate — não usa IRQ)
-#define IRQ_TIM4         47u   // TIM4 (PWM VVT — não usa IRQ)
-#define IRQ_ADC1         37u   // ADC1 (IRQ separado do ADC2)
-#define IRQ_ADC2         69u   // ADC2 (IRQ separado do ADC1)
-#define IRQ_FDCAN1_IT0   39u   // FDCAN1 interrupt line 0
+#define IRQ_TIM1_CC      44u
+#define IRQ_TIM2         45u
+#define IRQ_TIM5         48u
+#define IRQ_ADC1         49u
+#define IRQ_FDCAN1_IT0   50u
+#define IRQ_OTG_FS       67u
+#define IRQ_CORDIC       69u
+#define IRQ_TIM8_CC      100u
+#define IRQ_TIM15        101u
 // SysTick não usa NVIC — configurado via SCB->SHP diretamente (ARM core)

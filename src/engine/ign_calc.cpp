@@ -167,8 +167,8 @@ IgnScheduleParams build_ign_schedule(uint8_t cyl,
     return out;
 }
 
-uint32_t inj_pw_us_to_ftm0_ticks(uint32_t pw_us) noexcept {
-    return pw_us * 60u;
+uint32_t inj_pw_us_to_sched_ticks(uint32_t pw_us) noexcept {
+    return pw_us * 250u;
 }
 
 }  // namespace ems::engine

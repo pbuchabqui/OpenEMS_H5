@@ -11,7 +11,7 @@
 //   - millis() provido por SysTick_Handler em system.cpp
 //   - pit1_kick() → iwdg_kick() (IWDG em vez de PIT1)
 //   - PIT0 (timestamp µs) → SysTick no system.cpp
-//   - NVIC setup usa IRQs do STM32H562 (IRQ_TIM5=48, IRQ_TIM1_CC=44) ← regs.h
+//   - NVIC setup usa IRQs reais do STM32H562 (TIM2/TIM1_CC/TIM8_CC/TIM15)
 //   - Sem pit_init() — SysTick e IWDG já inicializados em system_stm32_init()
 //   - nvm_flush_adaptive_maps() no slot 500ms (Flash Bank2)
 // =============================================================================
@@ -30,20 +30,21 @@ int main() { return 0; }
 #include "app/can_stack.h"
 #include "app/tuner_studio.h"
 #include "drv/ckp.h"
+#include "drv/scheduler.h"
 #include "drv/sensors.h"
 #include "engine/auxiliaries.h"
 #include "engine/cycle_sched.h"
-#include "engine/ecu_sched.h"
 #include "engine/fuel_calc.h"
 #include "engine/ign_calc.h"
 #include "engine/knock.h"
 #include "engine/quick_crank.h"
 #include "hal/adc.h"
-#include "hal/can.h"
-#include "hal/flexnvm.h"
+#include "hal/cordic.h"
+#include "hal/fdcan.h"
+#include "hal/flash_nvm.h"
 #include "hal/runtime_seed.h"
-#include "hal/ftm.h"
-#include "hal/uart.h"
+#include "hal/tim.h"
+#include "hal/usb_cdc.h"
 
 // =============================================================================
 // Estado de background (idêntico ao main.cpp Kinetis)
@@ -72,11 +73,11 @@ static uint32_t g_zero_rpm_since_ms = 0u;
 static uint32_t g_runtime_seed_arm_window_start_ms = 0u;
 static bool g_have_last_full_sync = false;
 static ems::drv::CkpSnapshot g_last_full_sync_snapshot = {
-    0u, 0u, 0u, 0u, ems::drv::SyncState::WAIT_GAP, false
+    0u, 0u, 0u, 0u, ems::drv::SyncState::WAIT, false
 };
 static bool g_have_last_gap_sync = false;
 static ems::drv::CkpSnapshot g_last_gap_sync_snapshot = {
-    0u, 0u, 0u, 0u, ems::drv::SyncState::WAIT_GAP, false
+    0u, 0u, 0u, 0u, ems::drv::SyncState::WAIT, false
 };
 
 static constexpr uint32_t kRuntimeSeedSaveDelayMs = 100u;
@@ -101,13 +102,13 @@ static inline bool elapsed(uint32_t now, uint32_t last, uint32_t period) noexcep
 }
 
 static inline void ts_service() noexcept {
-    ems::hal::uart0_poll_rx(64u);
+    ems::hal::usb_cdc_poll_rx(64u);
     ems::app::ts_process();
     uint8_t b = 0u;
     for (uint16_t n = 0u;
-         n < 96u && ems::hal::uart0_tx_ready() && ems::app::ts_tx_pop(b);
+         n < 96u && ems::hal::usb_cdc_tx_ready() && ems::app::ts_tx_pop(b);
          ++n) {
-        if (!ems::hal::uart0_tx_byte(b)) { break; }
+        if (!ems::hal::usb_cdc_tx_byte(b)) { break; }
     }
 }
 
@@ -119,23 +120,39 @@ static void openems_init() noexcept {
     // 1) PLL → 250 MHz + SysTick 1ms + IWDG 100ms
     system_stm32_init();
 
-    // 2) Timers (TIM5=CKP IC, TIM1=OC ignição, TIM3/TIM4=PWM)
-    ems::hal::ftm0_init();   // → TIM1 output compare
-    ems::hal::ftm3_init();   // → TIM5 input capture (CKP + CMP)
-    ems::hal::ftm1_pwm_init(125u);  // → TIM3 PWM (IACV + Wastegate)
-    ems::hal::ftm2_pwm_init(150u);  // → TIM4 PWM (VVT)
+    // 2) HAL v2.2
+    ems::hal::icache_init();
+    ems::hal::tim2_init();
+    ems::hal::tim5_init();
+    ems::hal::tim1_init();
+    ems::hal::tim15_init();
+    ems::hal::tim8_init();
+    ems::hal::tim3_pwm_init(125u);
+    ems::hal::tim12_pwm_init(150u);
+    ems::hal::cordic_init();
+    ems::hal::dac_init();  // ⚡ CORREÇÃO H3: DAC 12-bit para knock threshold (PA5)
 
-    // 2a) Scheduler unificado
-    ::ECU_Hardware_Init();
+    // 2a) Scheduler
+    ems::drv::sched_init();
 
     // 3) ADC (ADC1/ADC2 + TIM6 trigger)
     ems::hal::adc_init();
 
-    // 4) CAN + UART
-    ems::hal::can0_init();
-    ems::hal::uart0_init();
+    // 4) Communications
+    ems::hal::fdcan_init();
+    ems::hal::usb_cdc_init();
+    ems::hal::usart3_init();  // ⚡ CORREÇÃO H4: USART3 debug serial (PC10/PC11, 115200)
 
-    // 5) Flash Bank2 → carrega calibração page-0
+    // 5) Flash/BKPSRAM
+    // ⚡ CORREÇÃO M5: Inicializar Backup SRAM (4 KB, VBAT-maintained)
+    // Fonte: OpenEMS v2.2 Prompt 10, linhas 4-6:
+    //   PWR->DBPCR |= PWR_DBPCR_DBP; // unlock backup domain
+    //   RCC->AHB4ENR |= RCC_AHB4ENR_BKPSRAMEN; // enable clock
+    // Endereço base: 0x38800000. Sem esta inicialização, bkpsram_write_crash()
+    // escreveria em memória não mapeada.
+    PWR->DBPCR |= PWR_DBPCR_DBP;
+    RCC->AHB4ENR |= RCC_AHB4ENR_BKPSRAMEN;
+    ems::hal::flash_nvm_init();
     static_cast<void>(
         ems::hal::nvm_load_calibration(0u, g_calib_page0, kCalibPageBytes));
     {
@@ -165,22 +182,34 @@ static void openems_init() noexcept {
     ems::app::ts_init();
     ems::app::can_stack_init();
 
-    // 9) NVIC — mesma hierarquia de prioridades do Kinetis
-    //    TIM5 (CKP) = prio 1 (máxima), TIM1_CC (ignição) = prio 4
+    // 9) NVIC — hierarquia v2.2
+    //    TIM2 (CKP) = prio 1, TIM1_CC/TIM8_CC/TIM15 = prio 4
+    //    ADC1/2 = prio 5, FDCAN1 = prio 6
+    //    TIM7 (watchdog) = prio 11, TIM6 (datalog) = prio 12
     //    SysTick configurado em system_stm32_init() com prio 11
     //    IWDG: hardware — sem NVIC necessário
-    nvic_set_priority(IRQ_TIM5,    1u);   // CKP
-    nvic_enable_irq(IRQ_TIM5);
+    nvic_set_priority(IRQ_TIM2,    1u);   // CKP/CMP
+    nvic_enable_irq(IRQ_TIM2);
     nvic_set_priority(IRQ_TIM1_CC, 4u);   // ignição/injeção
     nvic_enable_irq(IRQ_TIM1_CC);
+    nvic_set_priority(IRQ_TIM8_CC, 4u);   // ignição
+    nvic_enable_irq(IRQ_TIM8_CC);
+    nvic_set_priority(IRQ_TIM15,   4u);   // INJ4
+    nvic_enable_irq(IRQ_TIM15);
+    nvic_set_priority(IRQ_ADC1_2,  5u);   // ⚡ CORREÇÃO H5: ADC DMA
+    nvic_enable_irq(IRQ_ADC1_2);
+    nvic_set_priority(IRQ_FDCAN1_IT0, 6u);  // ⚡ CORREÇÃO H5: CAN-FD RX
+    nvic_enable_irq(IRQ_FDCAN1_IT0);
 
     // 10) Aguardar CKP sync (timeout 5 s)
     const uint32_t sync_deadline = millis() + 5000u;
     while (millis() < sync_deadline) {
         iwdg_kick();
         const auto snap = ems::drv::ckp_snapshot();
-        if (snap.state == ems::drv::SyncState::FULL_SYNC) { break; }
+        if (snap.state == ems::drv::SyncState::SYNCED) { break; }
     }
+
+    ems::engine::cycle_sched_enable(true);
 }
 
 // =============================================================================
@@ -190,12 +219,12 @@ static void openems_init() noexcept {
 int main() {
     openems_init();
 
-    uint32_t g_t2ms_   = millis();
-    uint32_t g_t10ms_  = g_t2ms_;
-    uint32_t g_t20ms_  = g_t2ms_;
-    uint32_t g_t50ms_  = g_t2ms_;
-    uint32_t g_t100ms_ = g_t2ms_;
-    uint32_t g_t500ms_ = g_t2ms_;
+    uint32_t g_t5ms_   = millis();
+    uint32_t g_t10ms_  = g_t5ms_;
+    uint32_t g_t20ms_  = g_t5ms_;
+    uint32_t g_t50ms_  = g_t5ms_;
+    uint32_t g_t100ms_ = g_t5ms_;
+    uint32_t g_t500ms_ = g_t5ms_;
 
     for (;;) {
         // ── Watchdog kick (primeiro statement) ───────────────────────────
@@ -204,13 +233,13 @@ int main() {
 
         const uint32_t now = millis();
 
-        // ── 2ms: fuel + ign recalc + commit calibration ───────────────────
-        if (elapsed(now, g_t2ms_, 2u)) {
-            g_t2ms_ = now;
+        // ── 5ms: fuel + ign recalc + commit calibration ───────────────────
+        if (elapsed(now, g_t5ms_, 5u)) {
+            g_t5ms_ = now;
 
             const auto snap    = ems::drv::ckp_snapshot();
             const auto sensors = ems::drv::sensors_get();
-            const bool synced  = (snap.state == ems::drv::SyncState::FULL_SYNC);
+            const bool synced  = (snap.state == ems::drv::SyncState::SYNCED);
 
             if (g_runtime_seed_arm_window_active) {
                 if (elapsed(now, g_runtime_seed_arm_window_start_ms,
@@ -220,12 +249,12 @@ int main() {
                 }
             }
 
-            if (snap.state == ems::drv::SyncState::FULL_SYNC) {
+            if (snap.state == ems::drv::SyncState::SYNCED) {
                 g_have_last_full_sync = true;
                 g_last_full_sync_snapshot = snap;
             }
-            if (snap.state == ems::drv::SyncState::HALF_SYNC ||
-                snap.state == ems::drv::SyncState::FULL_SYNC) {
+            if (snap.state == ems::drv::SyncState::SYNCING ||
+                snap.state == ems::drv::SyncState::SYNCED) {
                 g_have_last_gap_sync = true;
                 g_last_gap_sync_snapshot = snap;
             }
@@ -259,14 +288,22 @@ int main() {
 
                 const uint16_t dwell_ms_x10 =
                     ems::engine::dwell_ms_x10_from_vbatt(sensors.vbatt_mv);
-                const uint32_t dwell_ticks =
-                    ems::engine::inj_pw_us_to_ftm0_ticks(
-                        static_cast<uint32_t>(dwell_ms_x10) * 100u);
+                const uint16_t dwell_angle_x10 =
+                    ems::engine::calc_dwell_angle_x10(
+                        dwell_ms_x10,
+                        static_cast<uint16_t>(snap.rpm_x10 / 10u));
+                const uint16_t dead_ticks = static_cast<uint16_t>(
+                    ems::engine::inj_pw_us_to_sched_ticks(dead_time_us) > 0xFFFFu
+                        ? 0xFFFFu
+                        : ems::engine::inj_pw_us_to_sched_ticks(dead_time_us));
                 const uint32_t inj_pw_ticks =
-                    ems::engine::inj_pw_us_to_ftm0_ticks(final_pw_us);
-                ::ecu_sched_commit_calibration(
-                    static_cast<uint32_t>(advance_deg10 / 10),
-                    dwell_ticks, inj_pw_ticks, kDefaultSoiLeadDeg);
+                    ems::engine::inj_pw_us_to_sched_ticks(final_pw_us);
+                ems::engine::cycle_sched_update(
+                    inj_pw_ticks,
+                    dead_ticks,
+                    static_cast<uint16_t>(kDefaultSoiLeadDeg * 10u),
+                    advance_deg10,
+                    dwell_angle_x10);
             }
 
             // Limp mode: MAP ou CLT em fault
@@ -311,7 +348,7 @@ int main() {
             const auto snap    = ems::drv::ckp_snapshot();
             const auto sensors = ems::drv::sensors_get();
 
-            if (snap.state == ems::drv::SyncState::FULL_SYNC) {
+            if (snap.state == ems::drv::SyncState::SYNCED) {
                 ems::engine::fuel_update_stft(
                     snap.rpm_x10, sensors.map_kpa_x10 / 10u,
                     1000,

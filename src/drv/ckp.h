@@ -12,16 +12,16 @@
  * ───────────────────────────────
  *
  *                      gap && count≥55
- *   WAIT_GAP  ─────────────────────────►  HALF_SYNC
+ *   WAIT      ─────────────────────────►  SYNCING
  *       ▲                                     │  gap && count≥55
  *       │   gap detected                      ▼
- *   LOSS_OF_SYNC  ◄─── count>61 ────  FULL_SYNC
+ *   LOSS_OF_SYNC  ◄─── count>61 ────  SYNCED
  *       │                                     │
  *       └──────────── gap detected ───────────┘
  *                       (re-sync)
  *
- * HARDWARE: FTM3 Canal 0 (PTD0/CKP) em modo Input Capture, rising edge.
- *   ISR: ckp_ftm3_ch0_isr() — chamada por FTM3_IRQHandler() em hal/ftm.cpp
+ * HARDWARE: TIM2/TIM5 input capture no pinout STM32H5 v2.2.
+ *   ISR: entrada CKP/CMP servida pela HAL de timers/capture.
  *   Prioridade NVIC: 1 (mais alta do sistema) — §CLAUDE.md tabela IRQ
  */
 
@@ -38,10 +38,10 @@ namespace ems::drv {
  *       todo código que usa comparação direta com o inteiro subjacente.
  */
 enum class SyncState : uint8_t {
-    WAIT_GAP,       ///< Aguardando primeiro gap — sem referência angular
-    HALF_SYNC,      ///< Primeiro gap detectado — contando dentes para confirmar
-    FULL_SYNC,      ///< Sincronismo pleno — tooth_index e crank angle válidos
-    LOSS_OF_SYNC,   ///< Sincronia perdida — aguardando re-sync via próximo gap
+    WAIT = 0,       ///< Contrato v2.2: aguardando sincronismo
+    SYNCING = 1,    ///< Contrato v2.2: sincronismo em progresso
+    SYNCED = 2,     ///< Contrato v2.2: sincronizado
+    LOSS_OF_SYNC = 3,
 };
 
 /**
@@ -51,11 +51,9 @@ enum class SyncState : uint8_t {
  * ckp_snapshot() (captura atômica via seção crítica).
  */
 struct CkpSnapshot {
-    uint32_t tooth_period_ns;    ///< Período do último dente normal (ns); 0 antes de HALF_SYNC
-    uint16_t tooth_index;        ///< Índice do dente (0–57) contado desde o último gap; válido em FULL_SYNC
-    // FIX: uint16_t limitava a resolução a ~1ms @ 62.5 MHz (overflow em cranking < ~250 RPM).
-    // TIM5 é timer 32-bit — usar uint32_t preserva a resolução completa.
-    uint32_t last_ftm3_capture;  ///< Timestamp TIM5 (ticks, 32-bit) do último dente — para angle-to-ticks
+    uint32_t tooth_period_ticks;  ///< Contrato v2.2: período em ticks do timer CKP
+    uint16_t tooth_index;         ///< Índice do dente (0–57) contado desde o último gap; válido em SYNCED
+    uint32_t last_tim2_capture;   ///< Contrato v2.2: captura crua 32-bit
     uint32_t rpm_x10;            ///< RPM × 10 (ex: 8000 = 800,0 RPM); 0 antes de dados suficientes
     SyncState state;             ///< Estado corrente da máquina de sincronismo
     bool phase_A;                ///< Fase do ciclo de 4 tempos — alterna a cada evento no cam sensor (CH1)
@@ -70,26 +68,13 @@ struct CkpSnapshot {
 CkpSnapshot ckp_snapshot() noexcept;
 
 /**
- * @brief Converte ângulo de virabrequim em tick-alvo no domínio FTM3.
+ * @brief Converte ângulo de virabrequim em tick-alvo absoluto.
  *
- * @param angle_mdeg  Ângulo em MILIGRAUS (×1000 de graus inteiros).
- *                    Ex: 6000 = 6,0°; 60000 = 60,0°.
- *                    ATENÇÃO: passar graus inteiros causa erro de 1000×.
- * @param ref_capture Timestamp FTM3 do dente de referência
- *                    (tipicamente snap.last_ftm3_capture).
- * @return            Valor CnV para FTM3 — NÃO compatível com FTM0.
- *
- * DOMÍNIO DE CLOCK: FTM3 @ 60 MHz (PS=2, 16,7 ns/tick).
- * FTM0 @ 15 MHz (PS=8, 66,7 ns/tick). Para converter o delta para ticks
- * FTM0 divida por 4 (60 MHz / 15 MHz).
- *
- * STATUS (2026-03): Sem callers em produção. O pipeline ecu_sched deriva
- * ângulo→ticks no domínio FTM0 via g_ticks_per_rev (ecu_sched.cpp,
- * Calculate_Sequential_Cycle). Reservada para uso futuro em saídas
- * CKP-síncronas (tach-out, came via FTM3 output-compare).
+ * @param angle_x10   Ângulo em décimos de grau.
+ * @param ref_capture Timestamp de referência.
+ * @return            Timestamp absoluto no mesmo domínio do capture.
  */
-// FIX: ref_capture e retorno atualizados para uint32_t (TIM5 é timer 32-bit).
-uint32_t ckp_angle_to_ticks(uint16_t angle_mdeg, uint32_t ref_capture) noexcept;
+uint32_t ckp_angle_to_ticks(uint16_t angle_x10, uint32_t ref_capture) noexcept;
 
 // ── Hooks ─────────────────────────────────────────────────────────────────────
 // Chamados pela ISR de CKP a cada dente (símbolos fracos — sobrescreva para
@@ -103,15 +88,15 @@ void sensors_on_tooth(const CkpSnapshot& snap) noexcept;
 void schedule_on_tooth(const CkpSnapshot& snap) noexcept;
 void prime_on_tooth(const CkpSnapshot& snap) noexcept;
 
-// ── ISR handlers (chamados de hal/ftm.cpp) ────────────────────────────────────
-void ckp_ftm3_ch0_isr() noexcept;   ///< CKP rising edge (FTM3 CH0 / PTD0)
-void ckp_ftm3_ch1_isr() noexcept;   ///< Cam sensor rising edge (FTM3 CH1 / PTD1)
+// ── ISR handlers (chamados da HAL de timer/capture) ──────────────────────────
+void ckp_capture_primary_isr() noexcept;   ///< CKP rising edge
+void ckp_capture_secondary_isr() noexcept; ///< Cam sensor rising edge
 
 /**
  * @brief Arm a persisted sync seed for fast reacquire on next valid gap.
  *
  * Safety note: this does not bypass gap validation; it only allows promotion
- * WAIT_GAP/LOSS_OF_SYNC -> FULL_SYNC at the first accepted gap.
+ * WAIT/LOSS_OF_SYNC -> SYNCED at the first accepted gap if a persisted seed is armed.
  */
 void ckp_seed_arm(bool phase_A) noexcept;
 void ckp_seed_disarm() noexcept;
@@ -123,7 +108,7 @@ uint32_t ckp_seed_rejected_count() noexcept;
 // ── API de teste (somente em build host) ──────────────────────────────────────
 #if defined(EMS_HOST_TEST)
 void     ckp_test_reset() noexcept;
-uint32_t ckp_test_rpm_x10_from_period_ns(uint32_t period_ns) noexcept;
+uint32_t ckp_test_rpm_x10_from_period_ticks(uint32_t period_ticks) noexcept;
 #endif
 
 }  // namespace ems::drv

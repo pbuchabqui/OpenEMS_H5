@@ -14,11 +14,8 @@
 // [FIX-1] g_fault[] estatico sincronizado com reset_state() -- ranges identicos
 //         em ambos os locais (MAP/TPS/MAF: max 4095; FUEL/OIL: max 4050).
 //
-// [FIX-2] sensors_on_tooth() converte snap.tooth_period_ns -> ticks FTM3 com
-//         fator correto (*60/1000), pois FTM3 opera a 60 MHz efetivo
-//         (120 MHz system / prescaler 2, confirmado em hal/ftm.h).
-//         Codigo original usava fator 120 (erro 2x). CkpSnapshot nao expoe
-//         tooth_period_ftm3_ticks -- tooth_period_ns e o campo canonico.
+// [FIX-2] sensors_on_tooth() agora recebe snap.tooth_period_ticks no domínio
+//         canônico do timer CKP/PDB e o repassa diretamente ao ADC/PDB.
 //
 // [FIX-3] AN1-4 (ADC0_SE6b..9b) amostrados em sensors_tick_100ms() como
 //         passthrough, publicados em SensorData.an1_raw..an4_raw.
@@ -46,10 +43,8 @@ constexpr uint16_t kFallbackTpsPctX10  = 0u;
 constexpr int16_t  kFallbackCltDegcX10 = 900;
 constexpr int16_t  kFallbackIatDegcX10 = 250;
 
-// FTM3: 120 MHz system clock / prescaler 2 = 60 MHz efetivo = 16.667 ns/tick
-// PDB:  bus clock = 60 MHz
-// Razão 1:1 — nenhuma conversão de escala necessária.
-// Confirmado por hal/ftm.h: "FTM3: 120 MHz / prescaler 2 → 16.67 ns/tick"
+// O runtime host ainda usa a mesma base de tempo do pipeline legado para o
+// cálculo simplificado de MAF por frequência.
 constexpr uint32_t kMafFtm3ClockHz = 60000000u;
 
 struct FaultTracker {
@@ -95,6 +90,7 @@ static uint16_t g_tps_raw_max = 3895u;
 
 static uint16_t g_map_filt  = 0u;
 static uint16_t g_o2_filt   = 0u;
+static SensorData g_snapshot = {};
 
 static uint16_t g_tps_buf[4]  = {};
 static uint8_t  g_tps_pos     = 0u;
@@ -269,10 +265,9 @@ inline uint16_t maf_period_avg4() noexcept {
 // MAP, MAF-V, TPS, O2 — todos sincronizados ao mesmo ângulo de virabrequim
 // -----------------------------------------------------------------------------
 inline void sample_fast_channels() noexcept {
-    const uint16_t map_raw  = ems::hal::adc0_read(ems::hal::Adc0Channel::MAP_SE10);
-    const uint16_t mafv_raw = ems::hal::adc0_read(ems::hal::Adc0Channel::MAF_V_SE11);
-    const uint16_t tps_raw  = ems::hal::adc0_read(ems::hal::Adc0Channel::TPS_SE12);
-    const uint16_t o2_raw   = ems::hal::adc0_read(ems::hal::Adc0Channel::O2_SE4B);
+    const uint16_t map_raw = ems::hal::adc1_read(ems::hal::Adc1Channel::MAP);
+    const uint16_t tps_raw = ems::hal::adc1_read(ems::hal::Adc1Channel::TPS);
+    const uint16_t o2_raw  = ems::hal::adc1_read(ems::hal::Adc1Channel::O2);
 
     g_map_filt = iir_alpha_03(g_map_filt, map_raw);
     g_o2_filt  = iir_alpha_01(g_o2_filt,  o2_raw);
@@ -281,7 +276,6 @@ inline void sample_fast_channels() noexcept {
     g_tps_pos = static_cast<uint8_t>((g_tps_pos + 1u) & 0x3u);
 
     apply_fault(SensorId::MAP, map_raw);
-    apply_fault(SensorId::MAF, mafv_raw);
     apply_fault(SensorId::TPS, tps_raw);
     apply_fault(SensorId::O2,  o2_raw);
 
@@ -293,11 +287,7 @@ inline void sample_fast_channels() noexcept {
                          ? kFallbackTpsPctX10
                          : tps_raw_to_pct_x10(avg4(g_tps_buf));
 
-    // MAF: estimativa por frequência via FTM3 CH1 (120 MHz / prescaler 2 = 60 MHz)
-    const uint16_t maf_avg_period = maf_period_avg4();
-    g_data.maf_gps_x100 = (maf_avg_period > 0u)
-                          ? static_cast<uint16_t>(kMafFtm3ClockHz / maf_avg_period)
-                          : 0u;
+    g_data.o2_mv = raw_to_mv(g_o2_filt);
 }
 
 }  // namespace
@@ -375,14 +365,9 @@ void sensors_init() noexcept {
     reset_state();
 }
 
-// FIX-2 (revisado): CkpSnapshot não expõe tooth_period_ftm3_ticks.
-// Converte tooth_period_ns → ticks usando o clock efetivo do FTM3.
-// FTM3: 120 MHz / prescaler 2 = 60 MHz → 1 tick = 16.667 ns
-//   ticks = ns * 60 / 1000
-// PDB opera no mesmo clock (bus clock = 60 MHz) → razão 1:1,
-// adc_pdb_on_tooth usa o valor diretamente sem nova conversão.
 void sensors_on_tooth(const CkpSnapshot& snap) noexcept {
-    const uint16_t ticks = static_cast<uint16_t>((snap.tooth_period_ns * 60u) / 1000u);
+    const uint16_t ticks = static_cast<uint16_t>(
+        (snap.tooth_period_ticks > 0xFFFFu) ? 0xFFFFu : snap.tooth_period_ticks);
     ems::hal::adc_pdb_on_tooth(ticks);
 
     g_fast_sample_accum = static_cast<uint16_t>(
@@ -395,8 +380,8 @@ void sensors_on_tooth(const CkpSnapshot& snap) noexcept {
 }
 
 void sensors_tick_50ms() noexcept {
-    const uint16_t fuel_raw = ems::hal::adc1_read(ems::hal::Adc1Channel::FUEL_PRESS_SE5B);
-    const uint16_t oil_raw  = ems::hal::adc1_read(ems::hal::Adc1Channel::OIL_PRESS_SE6B);
+    const uint16_t fuel_raw = ems::hal::adc2_read(ems::hal::Adc2Channel::FUEL_PRESS);
+    const uint16_t oil_raw  = ems::hal::adc2_read(ems::hal::Adc2Channel::OIL_PRESS);
 
     g_fuel_buf[g_fuel_pos] = fuel_raw;
     g_fuel_pos = static_cast<uint8_t>((g_fuel_pos + 1u) & 0x3u);
@@ -415,8 +400,8 @@ void sensors_tick_50ms() noexcept {
 
 // [FIX-3] AN1-4 agora amostrados e publicados como passthrough em SensorData
 void sensors_tick_100ms() noexcept {
-    const uint16_t clt_raw = ems::hal::adc1_read(ems::hal::Adc1Channel::CLT_SE14);
-    const uint16_t iat_raw = ems::hal::adc1_read(ems::hal::Adc1Channel::IAT_SE15);
+    const uint16_t clt_raw = ems::hal::adc2_read(ems::hal::Adc2Channel::CLT);
+    const uint16_t iat_raw = ems::hal::adc2_read(ems::hal::Adc2Channel::IAT);
 
     g_clt_buf[g_clt_pos] = clt_raw;
     g_clt_pos = static_cast<uint8_t>((g_clt_pos + 1u) & 0x7u);
@@ -437,12 +422,11 @@ void sensors_tick_100ms() noexcept {
                           ? kFallbackIatDegcX10
                           : lut128(g_iat_table, iat_avg);
 
-    // Expansão AN1-4: passthrough direto — sem filtro, sem fault tracking
-    // [FIX-3] canais antes ignorados; agora publicados em SensorData
-    g_data.an1_raw = ems::hal::adc0_read(ems::hal::Adc0Channel::AN1_SE6B);
-    g_data.an2_raw = ems::hal::adc0_read(ems::hal::Adc0Channel::AN2_SE7B);
-    g_data.an3_raw = ems::hal::adc0_read(ems::hal::Adc0Channel::AN3_SE8B);
-    g_data.an4_raw = ems::hal::adc0_read(ems::hal::Adc0Channel::AN4_SE9B);
+    // AN1-4 não estão no spec v2.2 para STM32H5 — limpar
+    g_data.an1_raw = 0u;
+    g_data.an2_raw = 0u;
+    g_data.an3_raw = 0u;
+    g_data.an4_raw = 0u;
 
     // TODO: VBATT via canal dedicado quando mapeamento elétrico for definido.
     g_data.vbatt_mv = 12000u;
@@ -462,32 +446,28 @@ void sensors_set_range(SensorId id, SensorRange range) noexcept {
     g_fault[static_cast<uint8_t>(id)].range = range;
 }
 
-SensorData sensors_get() noexcept {
-    // FIX-6: snapshot atômico — CPSID impede preempção pela ISR FTM3 durante
-    // a cópia de 26 bytes, garantindo que todos os campos pertencem ao mesmo
-    // instante de amostragem. Sem este critical section, um torn read pode
-    // combinar map_kpa_x10 de antes da ISR com clt_degc_x10 de depois.
-    SensorData out;
-#if defined(__arm__) || defined(__thumb__)
+const SensorData& sensors_get() noexcept {
+    #if defined(__arm__) || defined(__thumb__)
     __asm__ volatile("cpsid i" ::: "memory");
-#endif
-    out.map_kpa_x10        = g_data.map_kpa_x10;
-    out.maf_gps_x100       = g_data.maf_gps_x100;
-    out.tps_pct_x10        = g_data.tps_pct_x10;
-    out.clt_degc_x10       = g_data.clt_degc_x10;
-    out.iat_degc_x10       = g_data.iat_degc_x10;
-    out.fuel_press_kpa_x10 = g_data.fuel_press_kpa_x10;
-    out.oil_press_kpa_x10  = g_data.oil_press_kpa_x10;
-    out.vbatt_mv           = g_data.vbatt_mv;
-    out.fault_bits         = g_data.fault_bits;
-    out.an1_raw            = g_data.an1_raw;
-    out.an2_raw            = g_data.an2_raw;
-    out.an3_raw            = g_data.an3_raw;
-    out.an4_raw            = g_data.an4_raw;
+    #endif
+    g_snapshot.map_kpa_x10        = g_data.map_kpa_x10;
+    g_snapshot.maf_gps_x100       = g_data.maf_gps_x100;
+    g_snapshot.tps_pct_x10        = g_data.tps_pct_x10;
+    g_snapshot.clt_degc_x10       = g_data.clt_degc_x10;
+    g_snapshot.iat_degc_x10       = g_data.iat_degc_x10;
+    g_snapshot.fuel_press_kpa_x10 = g_data.fuel_press_kpa_x10;
+    g_snapshot.oil_press_kpa_x10  = g_data.oil_press_kpa_x10;
+    g_snapshot.vbatt_mv           = g_data.vbatt_mv;
+    g_snapshot.fault_bits         = g_data.fault_bits;
+    g_snapshot.o2_mv              = g_data.o2_mv;
+    g_snapshot.an1_raw            = g_data.an1_raw;
+    g_snapshot.an2_raw            = g_data.an2_raw;
+    g_snapshot.an3_raw            = g_data.an3_raw;
+    g_snapshot.an4_raw            = g_data.an4_raw;
 #if defined(__arm__) || defined(__thumb__)
     __asm__ volatile("cpsie i" ::: "memory");
 #endif
-    return out;
+    return g_snapshot;
 }
 
 #if defined(EMS_HOST_TEST)

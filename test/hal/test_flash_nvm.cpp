@@ -3,7 +3,7 @@
 #include <cstring>
 
 #define EMS_HOST_TEST 1
-#include "hal/flexnvm.h"
+#include "hal/flash_nvm.h"
 #include "hal/runtime_seed.h"
 
 namespace {

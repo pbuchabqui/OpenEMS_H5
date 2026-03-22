@@ -25,12 +25,14 @@ SRC_DIR   := src
 CPP_SRCS := \
     $(SRC_DIR)/main.cpp \
     $(SRC_DIR)/hal/system.cpp \
-    $(SRC_DIR)/hal/timer.cpp \
+    $(SRC_DIR)/hal/tim.cpp \
     $(SRC_DIR)/hal/adc.cpp \
-    $(SRC_DIR)/hal/can.cpp \
-    $(SRC_DIR)/hal/uart.cpp \
-    $(SRC_DIR)/hal/flexnvm.cpp \
+    $(SRC_DIR)/hal/fdcan.cpp \
+    $(SRC_DIR)/hal/cordic.cpp \
+    $(SRC_DIR)/hal/flash_nvm.cpp \
+    $(SRC_DIR)/hal/usb_cdc.cpp \
     $(SRC_DIR)/drv/ckp.cpp \
+    $(SRC_DIR)/drv/scheduler.cpp \
     $(SRC_DIR)/drv/sensors.cpp \
     $(SRC_DIR)/engine/fuel_calc.cpp \
     $(SRC_DIR)/engine/ign_calc.cpp \

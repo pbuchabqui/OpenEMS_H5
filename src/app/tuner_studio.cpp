@@ -22,9 +22,9 @@ constexpr uint8_t kAckOk = 0x00u;
 constexpr uint8_t kAckErr = 0x01u;
 constexpr uint8_t kCommsTestMagic = 0xAAu;
 
-constexpr char kSignature[] = "OpenEMS_v1.1";
-constexpr char kFwVersion[] = "OpenEMS_fw_1.1";
-constexpr char kProtocolVersion[] = "001";
+constexpr char kSignature[] = "OpenEMS_v2.2";
+constexpr char kFwVersion[] = "OpenEMS_v2.2";
+constexpr char kProtocolVersion[] = "003";
 
 enum class ParseState : uint8_t {
     IDLE = 0u,
@@ -183,7 +183,7 @@ inline void update_realtime_page() noexcept {
     rt.stft_p100   = g_rt_stft_p100;
 
     uint8_t status = 0u;
-    if (c.state == ems::drv::SyncState::FULL_SYNC) {
+    if (c.state == ems::drv::SyncState::SYNCED) {
         status |= ems::app::STATUS_SYNC_FULL;
     }
     if (c.phase_A) {
@@ -442,7 +442,7 @@ void ts_init() noexcept {
     ts_update_rt_sched_diag(0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u);
 }
 
-void ts_uart0_rx_isr_byte(uint8_t byte) noexcept {
+void ts_rx_byte(uint8_t byte) noexcept {
     const uint16_t next = static_cast<uint16_t>((g_rx_head + 1u) & kRxMask);
     if (next != g_rx_tail) {
         g_rx_buf[g_rx_head] = byte;

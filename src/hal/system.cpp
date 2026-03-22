@@ -202,8 +202,8 @@ void system_stm32_init(void) noexcept {
     }
 
     // ── 5. Selecionar PLL1Q como clock source do FDCAN1/2 ────────────────
-    // PLL1Q = 62.5 MHz → bit timing can.cpp: NBRP+1=5, Tq=80ns → 500 kbps ✓
-    // Deve ser configurado antes de can0_init() habilitar FDCAN.
+    // PLL1Q = 62.5 MHz → bit timing fdcan.cpp: NBRP+1=5, Tq=80ns → 500 kbps ✓
+    // Deve ser configurado antes de fdcan_init() habilitar FDCAN.
     RCC_CCIPR5 = (RCC_CCIPR5 & ~0x3u) | RCC_CCIPR5_FDCAN12SEL_PLL1Q;
 
     // ── 6. Configurar prescalers APB (manter AHB = SYSCLK) ───────────────

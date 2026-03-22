@@ -34,7 +34,7 @@ bool nvm_clear_runtime_seed() noexcept;
 // Cobre todos os bytes do struct exceto o campo crc32 no final:
 //   sizeof(RuntimeSyncSeed) - sizeof(uint32_t) bytes
 //
-// FIX: a função era definida apenas em #ifdef EMS_HOST_TEST (flexnvm.cpp),
+// FIX: a função era definida apenas em #ifdef EMS_HOST_TEST na camada NVM antiga,
 // causando divergência: produção não validava CRC, mock validava.
 inline uint32_t runtime_seed_crc32(const RuntimeSyncSeed& seed) noexcept {
     uint32_t crc = 0xFFFFFFFFu;

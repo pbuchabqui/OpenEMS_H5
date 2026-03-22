@@ -4,7 +4,7 @@
  *
  * Mapa de memória (RM0481):
  *   Flash Bank1:  0x08000000 – 0x0807FFFF  (512 KB) ← código + dados RO
- *   Flash Bank2:  0x08100000 – 0x0817FFFF  (512 KB) ← NVM (flexnvm.cpp)
+ *   Flash Bank2:  0x08100000 – 0x0817FFFF  (512 KB) ← NVM (flash_nvm.cpp)
  *   SRAM1 (AXI): 0x20000000 – 0x2003FFFF  (256 KB) ← dados + heap + stack
  *
  * Layout do stack:
