@@ -407,8 +407,8 @@ int main() {
                                                     kCalibPageBytes));
                 g_calib_dirty = false;
             }
-            // LTFT e knock maps são persistidos via nvm_write_ltft/nvm_write_knock
-            // diretamente de fuel_calc.cpp — sem flush explícito necessário aqui.
+            // Flush LTFT and knock adaptive maps to Flash Bank2 if dirty
+            static_cast<void>(ems::hal::nvm_flush_adaptive_maps());
         }
 
         // CAN RX é processado internamente por can_stack_process() no slot 10ms.

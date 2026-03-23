@@ -180,6 +180,10 @@ bool nvm_save_calibration(uint8_t page, const uint8_t* data, uint16_t len) noexc
     if (page > 2u || data == nullptr || len == 0u) {
         return false;
     }
+    // Guard against buffer overflow: data + header must fit in one sector
+    if (static_cast<uint32_t>(len) + kCalHdrSz > FLASH_SECTOR_SIZE) {
+        return false;
+    }
 
     const uint32_t sector = kSectorCal0 + page;
     const uint32_t dest = kBank2Base + sector * kSectorSize;
@@ -388,6 +392,10 @@ void nvm_reset_knock_map() noexcept {
 
 bool nvm_save_calibration(uint8_t page, const uint8_t* data, uint16_t len) noexcept {
     if (page > 2u || data == nullptr || len == 0u) {
+        return false;
+    }
+    // Guard against buffer overflow: data + header must fit in buffer
+    if (static_cast<uint32_t>(len) + kCalHdrSz > sizeof(g_cal[0])) {
         return false;
     }
     if (g_flash_busy) {

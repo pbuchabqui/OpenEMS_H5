@@ -28,6 +28,10 @@ inline bool elapsed(uint32_t now_ms, uint32_t last_ms, uint32_t period_ms) noexc
     return static_cast<uint32_t>(now_ms - last_ms) >= period_ms;
 }
 
+// Crank angle per tooth in millidegrees for a 60-2 wheel:
+//   360° / 58 teeth × 1000 = 6206.897 ≈ 6207 millidegrees/tooth
+static constexpr uint32_t kCrankAnglePerToothMdeg = 6207u;
+
 inline void write_u16_le(uint8_t* dst, uint16_t v) noexcept {
     dst[0] = static_cast<uint8_t>(v & 0xFFu);
     dst[1] = static_cast<uint8_t>((v >> 8u) & 0xFFu);
@@ -84,7 +88,7 @@ inline void tx_0x400(const ems::drv::CkpSnapshot& ckp,
     const uint16_t lambda_x1000 = ems::app::can_stack_lambda_milli_safe(now_ms);
     const int16_t stft_pct_x10 =
         clamp_i16(static_cast<int32_t>(stft_pct) * 10);
-    const uint32_t abs_crank_angle = static_cast<uint32_t>(ckp.tooth_index) * 6207u;
+    const uint32_t abs_crank_angle = static_cast<uint32_t>(ckp.tooth_index) * kCrankAnglePerToothMdeg;
 
     write_u16_le(&out.data[0], rpm);
     write_u16_le(&out.data[2], sensors.map_kpa_x10);
