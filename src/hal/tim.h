@@ -27,6 +27,8 @@ void tim3_set_duty(uint8_t ch, uint16_t duty_pct_x10) noexcept;
 void tim12_set_duty(uint8_t ch, uint16_t duty_pct_x10) noexcept;
 void bkin_rearm_tim1() noexcept;
 void bkin_rearm_tim8() noexcept;
+bool bkin_test_tim1() noexcept;
+bool bkin_test_tim8() noexcept;
 
 extern "C" void TIM1_CC_IRQHandler();
 extern "C" void TIM8_CC_IRQHandler();

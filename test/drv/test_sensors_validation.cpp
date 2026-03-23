@@ -188,10 +188,9 @@ void test_get_sensor_health_status_map_fault() {
     // three fast-sampling rounds with out-of-range MAP values.
     ems::drv::sensors_set_range(ems::drv::SensorId::MAP, {100u, 200u});
 
-    ems::hal::adc_test_set_raw_adc0(ems::hal::Adc0Channel::MAP_SE10, 4000u);
-    ems::hal::adc_test_set_raw_adc0(ems::hal::Adc0Channel::MAF_V_SE11, 1000u);
-    ems::hal::adc_test_set_raw_adc0(ems::hal::Adc0Channel::TPS_SE12, 1000u);
-    ems::hal::adc_test_set_raw_adc0(ems::hal::Adc0Channel::O2_SE4B, 1000u);
+    ems::hal::adc_test_set_raw_adc1(ems::hal::Adc1Channel::MAP, 4000u);
+    ems::hal::adc_test_set_raw_adc1(ems::hal::Adc1Channel::TPS, 1000u);
+    ems::hal::adc_test_set_raw_adc1(ems::hal::Adc1Channel::O2, 1000u);
 
     ems::drv::CkpSnapshot snap = {100000u, 0u, 0u, 0u, ems::drv::SyncState::SYNCED, false};
     for (int i = 0; i < 15; ++i) {

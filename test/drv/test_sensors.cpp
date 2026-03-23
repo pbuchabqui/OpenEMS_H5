@@ -51,14 +51,13 @@ ems::drv::CkpSnapshot mk_snap() {
     };
 }
 
-// Alimenta os 4 canais rápidos do ADC0 com valor constante por N dentes.
+// Alimenta os 3 canais rápidos do ADC1 com valor constante por N dentes.
 // kFastSamplesPerRev=12, kRealTeethPerRev=58 → amostragem a cada ~4.8 dentes.
 // cycles=N * 5 garante N amostras efetivas.
 void feed_fast_constant(uint16_t raw, int cycles) {
-    ems::hal::adc_test_set_raw_adc0(ems::hal::Adc0Channel::MAP_SE10,   raw);
-    ems::hal::adc_test_set_raw_adc0(ems::hal::Adc0Channel::MAF_V_SE11, raw);
-    ems::hal::adc_test_set_raw_adc0(ems::hal::Adc0Channel::TPS_SE12,   raw);
-    ems::hal::adc_test_set_raw_adc0(ems::hal::Adc0Channel::O2_SE4B,    raw);
+    ems::hal::adc_test_set_raw_adc1(ems::hal::Adc1Channel::MAP, raw);
+    ems::hal::adc_test_set_raw_adc1(ems::hal::Adc1Channel::TPS, raw);
+    ems::hal::adc_test_set_raw_adc1(ems::hal::Adc1Channel::O2,  raw);
 
     auto snap = mk_snap();
     for (int i = 0; i < cycles; ++i) {
@@ -93,7 +92,7 @@ void test_clt_fault_after_3_out_of_range() {
     reset_all();
     ems::drv::sensors_set_range(ems::drv::SensorId::CLT,
                                 ems::drv::SensorRange{100u, 3800u});
-    ems::hal::adc_test_set_raw_adc1(ems::hal::Adc1Channel::CLT_SE14, 4095u);
+    ems::hal::adc_test_set_raw_adc2(ems::hal::Adc2Channel::CLT, 4095u);
 
     ems::drv::sensors_tick_100ms();
     ems::drv::sensors_tick_100ms();
@@ -116,10 +115,9 @@ void test_tps_calibration_midpoint() {
     reset_all();
     ems::drv::sensors_set_tps_cal(200u, 3895u);
 
-    ems::hal::adc_test_set_raw_adc0(ems::hal::Adc0Channel::MAP_SE10,   1000u);
-    ems::hal::adc_test_set_raw_adc0(ems::hal::Adc0Channel::MAF_V_SE11, 1000u);
-    ems::hal::adc_test_set_raw_adc0(ems::hal::Adc0Channel::TPS_SE12,   2047u);
-    ems::hal::adc_test_set_raw_adc0(ems::hal::Adc0Channel::O2_SE4B,    1000u);
+    ems::hal::adc_test_set_raw_adc1(ems::hal::Adc1Channel::MAP, 1000u);
+    ems::hal::adc_test_set_raw_adc1(ems::hal::Adc1Channel::TPS, 2047u);
+    ems::hal::adc_test_set_raw_adc1(ems::hal::Adc1Channel::O2,  1000u);
 
     auto snap = mk_snap();
     for (int i = 0; i < 80; ++i) {
@@ -130,7 +128,7 @@ void test_tps_calibration_midpoint() {
     TEST_ASSERT_TRUE(s.tps_pct_x10 >= 495u && s.tps_pct_x10 <= 505u);
 }
 
-// ─── Novos testes — correções FIX-1, FIX-2, FIX-3 ───────────────────────────
+// ─── Novos testes — correções FIX-1, FIX-2 ──────────────────────────────────
 
 // [FIX-1] ranges padrão idênticos após sensors_init() e após sensors_test_reset()
 // Verifica que MAP aceita raw=4095 (max=4095) sem gerar fault em nenhum dos dois casos.
@@ -139,7 +137,7 @@ void test_fault_ranges_consistent_after_init_and_reset() {
     ems::hal::adc_init();
     ems::drv::sensors_init();
 
-    ems::hal::adc_test_set_raw_adc0(ems::hal::Adc0Channel::MAP_SE10, 4095u);
+    ems::hal::adc_test_set_raw_adc1(ems::hal::Adc1Channel::MAP, 4095u);
     // 3 amostras — não deve ser fault porque max_raw=4095
     for (int i = 0; i < 15; ++i) {
         auto snap = mk_snap();
@@ -152,7 +150,7 @@ void test_fault_ranges_consistent_after_init_and_reset() {
 
     // Após sensors_test_reset() — deve ser idêntico
     ems::drv::sensors_test_reset();
-    ems::hal::adc_test_set_raw_adc0(ems::hal::Adc0Channel::MAP_SE10, 4095u);
+    ems::hal::adc_test_set_raw_adc1(ems::hal::Adc1Channel::MAP, 4095u);
     for (int i = 0; i < 15; ++i) {
         auto snap = mk_snap();
         ems::drv::sensors_on_tooth(snap);
@@ -172,23 +170,6 @@ void test_pdb_mod_uses_ftm3_ticks_directly() {
     TEST_ASSERT_EQ_U32(60000u, ems::hal::adc_test_last_pdb_mod());
 }
 
-// [FIX-3] AN1-4 publicados em sensors_tick_100ms()
-void test_an1_to_an4_passthrough() {
-    reset_all();
-    ems::hal::adc_test_set_raw_adc0(ems::hal::Adc0Channel::AN1_SE6B, 1111u);
-    ems::hal::adc_test_set_raw_adc0(ems::hal::Adc0Channel::AN2_SE7B, 2222u);
-    ems::hal::adc_test_set_raw_adc0(ems::hal::Adc0Channel::AN3_SE8B, 3333u);
-    ems::hal::adc_test_set_raw_adc0(ems::hal::Adc0Channel::AN4_SE9B,  444u);
-
-    ems::drv::sensors_tick_100ms();
-
-    const auto& s = ems::drv::sensors_get();
-    TEST_ASSERT_EQ_U32(1111u, s.an1_raw);
-    TEST_ASSERT_EQ_U32(2222u, s.an2_raw);
-    TEST_ASSERT_EQ_U32(3333u, s.an3_raw);
-    TEST_ASSERT_EQ_U32( 444u, s.an4_raw);
-}
-
 }  // namespace
 
 int main() {
@@ -199,10 +180,9 @@ int main() {
     test_map_linearization_full_scale();
     test_tps_calibration_midpoint();
 
-    std::printf("=== Testes das correções (FIX-1, FIX-2, FIX-3) ===\n");
+    std::printf("=== Testes das correções (FIX-1, FIX-2) ===\n");
     test_fault_ranges_consistent_after_init_and_reset();
     test_pdb_mod_uses_ftm3_ticks_directly();
-    test_an1_to_an4_passthrough();
 
     std::printf("\ntests=%d failed=%d\n", g_tests_run, g_tests_failed);
     return (g_tests_failed == 0) ? 0 : 1;

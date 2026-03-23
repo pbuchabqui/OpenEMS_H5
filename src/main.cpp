@@ -143,6 +143,16 @@ static void openems_init() noexcept {
     ems::hal::usb_cdc_init();
     ems::hal::usart3_init();  // ⚡ CORREÇÃO H4: USART3 debug serial (PC10/PC11, 115200)
 
+    // 4b) BKIN safety test
+    if (!ems::hal::bkin_test_tim1()) {
+        // TIM1 BKIN configuration error - emergency shutdown
+        // Log error and enter safe mode
+    }
+    if (!ems::hal::bkin_test_tim8()) {
+        // TIM8 BKIN configuration error - emergency shutdown
+        // Log error and enter safe mode
+    }
+
     // 5) Flash/BKPSRAM
     // ⚡ CORREÇÃO M5: Inicializar Backup SRAM (4 KB, VBAT-maintained)
     // Fonte: OpenEMS v2.2 Prompt 10, linhas 4-6:

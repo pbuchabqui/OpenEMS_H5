@@ -296,6 +296,46 @@ void bkin_rearm_tim8() noexcept {
     TIM8_BDTR |= (1u << 15);
 }
 
+bool bkin_test_tim1() noexcept {
+    // Test TIM1 BKIN: verify BKE bit is set and BKIN pin (PB12) is configured
+    // Check BDTR.BKE (bit 12) is set
+    if ((TIM1_BDTR & (1u << 12u)) == 0u) {
+        return false;
+    }
+    // Check PB12 is configured as AF1 (TIM1_BKIN)
+    // MODER bits [25:24] should be 10b (AF mode)
+    // AFRH bits [19:16] should be 0001b (AF1)
+    const uint32_t moder = GPIOB_MODER;
+    const uint32_t afrh = GPIOB_AFRH;
+    if (((moder >> 24u) & 0x03u) != 0x02u) {  // Not AF mode
+        return false;
+    }
+    if (((afrh >> 16u) & 0x0Fu) != 0x01u) {  // Not AF1
+        return false;
+    }
+    return true;
+}
+
+bool bkin_test_tim8() noexcept {
+    // Test TIM8 BKIN: verify BKE bit is set and BKIN pin (PA6) is configured
+    // Check BDTR.BKE (bit 12) is set
+    if ((TIM8_BDTR & (1u << 12u)) == 0u) {
+        return false;
+    }
+    // Check PA6 is configured as AF3 (TIM8_BKIN)
+    // MODER bits [13:12] should be 10b (AF mode)
+    // AFRL bits [27:24] should be 0011b (AF3)
+    const uint32_t moder = GPIOA_MODER;
+    const uint32_t afrl = GPIOA_AFRL;
+    if (((moder >> 12u) & 0x03u) != 0x02u) {  // Not AF mode
+        return false;
+    }
+    if (((afrl >> 24u) & 0x0Fu) != 0x03u) {  // Not AF3
+        return false;
+    }
+    return true;
+}
+
 extern "C" void TIM2_IRQHandler() {
     const uint32_t sr = TIM2_SR;
     if ((sr & TIM_SR_CC1IF) != 0u) {

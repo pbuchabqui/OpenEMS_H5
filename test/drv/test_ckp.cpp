@@ -91,8 +91,10 @@ void test_false_gap_ignored_before_tooth55() {
 
 void test_rpm_formula() {
     test_reset();
-    // 800 RPM × 10 = 8000. Com tick de 4 ns: período = 1_250_000 / 4 = 312_500 ticks.
-    const uint32_t rpm_x10 = ems::drv::ckp_test_rpm_x10_from_period_ticks(312500u);
+    // 800 RPM × 10 = 8000. Com tick de 4 ns:
+    // rpm_x10 = 25862068 / period_ticks
+    // Para 8000 rpm_x10: period_ticks = 25862068 / 8000 = 3232.76 ≈ 3233 ticks
+    const uint32_t rpm_x10 = ems::drv::ckp_test_rpm_x10_from_period_ticks(3233u);
     TEST_ASSERT_TRUE(rpm_x10 >= 7990u && rpm_x10 <= 8010u);
 }
 

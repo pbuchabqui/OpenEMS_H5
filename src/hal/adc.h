@@ -37,7 +37,8 @@ enum class Adc2Channel : uint8_t {
     IAT        = 1,  // PC5  → ADC2_IN12
     FUEL_PRESS = 2,  // PA2  → ADC2_IN14
     OIL_PRESS  = 3,  // PA3  → ADC2_IN15
-    COUNT = 4,
+    VBATT      = 4,  // PC3  → ADC2_IN13
+    COUNT = 5,
 };
 
 void     adc_init() noexcept;

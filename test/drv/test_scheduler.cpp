@@ -80,7 +80,7 @@ void test_isr_disarms_timer_groups() {
 void test_recalc_is_noop_for_absolute_scheduler() {
     reset_all();
     const ems::drv::CkpSnapshot snap = {0u, 0u, 0u, 80000u, ems::drv::SyncState::SYNCED, false};
-    static_cast<void>(ems::drv::sched_event(ems::drv::Channel::INJ3, 0xCAFEBABEu, ems::drv::Action::SET));
+    static_cast<void>(ems::drv::sched_event(ems::drv::Channel::INJ3, 0x0000BABEu, ems::drv::Action::SET));
     ems::drv::sched_recalc(snap);
     TEST_ASSERT_EQ_U32(0xBABEu, ems::hal::tim_test_get_compare(1u, 2u));
     TEST_ASSERT_TRUE(ems::drv::sched_test_is_armed(ems::drv::Channel::INJ3));

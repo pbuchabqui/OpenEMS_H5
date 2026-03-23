@@ -34,14 +34,14 @@ namespace {
 // ── Índices internos ──────────────────────────────────────────────────────────
 // g_adc1_raw[0] = MAP, [1] = TPS, [2] = O2
 static volatile uint16_t g_adc1_raw[3] = {};
-// g_adc2_raw[0] = CLT, [1] = IAT, [2] = FUEL_PRESS, [3] = OIL_PRESS
-static volatile uint16_t g_adc2_raw[4] = {};
+// g_adc2_raw[0] = CLT, [1] = IAT, [2] = FUEL_PRESS, [3] = OIL_PRESS, [4] = VBATT
+static volatile uint16_t g_adc2_raw[5] = {};
 
 // ── Constantes de canal STM32H5 ───────────────────────────────────────────────
 // ADC1 canais: MAP=IN11, TPS=IN13, O2=IN5
 static constexpr uint8_t kAdc1Channels[3] = {11u, 13u, 5u};
-// ADC2 canais: CLT=IN11, IAT=IN12, FUEL_PRESS=IN14, OIL_PRESS=IN15
-static constexpr uint8_t kAdc2Channels[4] = {11u, 12u, 14u, 15u};
+// ADC2 canais: CLT=IN11, IAT=IN12, FUEL_PRESS=IN14, OIL_PRESS=IN15, VBATT=IN13
+static constexpr uint8_t kAdc2Channels[5] = {11u, 12u, 14u, 15u, 13u};
 
 // ── Tempo de amostragem: 47.5 ciclos (SMP[2:0] = 011b) ──────────────────────
 static constexpr uint32_t kSmpr47c5 = 0x03u;
@@ -137,6 +137,7 @@ void adc_init() noexcept {
     // ADC2: PA2(IN14), PA3(IN15), PC4(IN11), PC5(IN12)
     gpio_set_analog_mode(&GPIOA_MODER, 2u);   // PA2 → ADC2_IN14 (fuel_press)
     gpio_set_analog_mode(&GPIOA_MODER, 3u);   // PA3 → ADC2_IN15 (oil_press)
+    gpio_set_analog_mode(gpioc_moder, 3u);    // PC3 → ADC2_IN13 (VBATT)
     gpio_set_analog_mode(gpioc_moder, 4u);    // PC4 → ADC2_IN11 (CLT)
     gpio_set_analog_mode(gpioc_moder, 5u);    // PC5 → ADC2_IN12 (IAT)
 
@@ -176,13 +177,13 @@ void adc_init() noexcept {
     adc_calibrate_and_enable(ADC2_CR, ADC2_ISR);
 
     adc_configure_sampling(ADC2_SMPR1, ADC2_SMPR2,
-                            kAdc2Channels, 4u);
+                            kAdc2Channels, 5u);
 
-    // Sequência: CLT(IN11), IAT(IN12), FUEL_PRESS(IN14), OIL_PRESS(IN15)
-    // ADC2 tem apenas 4 canais (SQ1-SQ4), cabe todo em SQR1
-    volatile uint32_t dummy_sqr2 = 0u;
-    adc_configure_sequence(ADC2_SQR1, dummy_sqr2,
-                            kAdc2Channels, 4u);
+    // Sequência: CLT(IN11), IAT(IN12), FUEL_PRESS(IN14), OIL_PRESS(IN15), VBATT(IN13)
+    // ADC2 tem 5 canais (SQ1-SQ5), SQ1-SQ4 em SQR1, SQ5 em SQR2
+    volatile uint32_t adc2_sqr2 = 0u;
+    adc_configure_sequence(ADC2_SQR1, adc2_sqr2,
+                            kAdc2Channels, 5u);
 
     // ADC2: 12-bit, software trigger (sem trigger externo)
     ADC2_CFGR1 = (0x00u << 3u);   // RES = 12-bit, sem trigger externo
@@ -247,7 +248,7 @@ extern "C" void ADC1_2_IRQHandler(void) {
 namespace ems::hal {
 
 static uint16_t g_adc1_mock[3] = {};
-static uint16_t g_adc2_mock[4] = {};
+static uint16_t g_adc2_mock[5] = {};
 static uint16_t g_last_pdb_mod = 0u;
 
 void     adc_init() noexcept {}
@@ -258,15 +259,15 @@ uint16_t adc1_read(Adc1Channel ch) noexcept {
 }
 uint16_t adc2_read(Adc2Channel ch) noexcept {
     const uint8_t idx = static_cast<uint8_t>(ch);
-    return (idx < 4u) ? g_adc2_mock[idx] : 0u;
-}
-void adc_test_set_raw_adc1(Adc1Channel ch, uint16_t v) noexcept {
-    const uint8_t idx = static_cast<uint8_t>(ch);
-    if (idx < 3u) { g_adc1_mock[idx] = v; }
+    return (idx < 5u) ? g_adc2_mock[idx] : 0u;
 }
 void adc_test_set_raw_adc2(Adc2Channel ch, uint16_t v) noexcept {
     const uint8_t idx = static_cast<uint8_t>(ch);
-    if (idx < 4u) { g_adc2_mock[idx] = v; }
+    if (idx < 5u) { g_adc2_mock[idx] = v; }
+}
+void     adc_test_set_raw_adc1(Adc1Channel ch, uint16_t v) noexcept {
+    const uint8_t idx = static_cast<uint8_t>(ch);
+    if (idx < 3u) { g_adc1_mock[idx] = v; }
 }
 uint16_t adc_test_last_pdb_mod() noexcept { return g_last_pdb_mod; }
 

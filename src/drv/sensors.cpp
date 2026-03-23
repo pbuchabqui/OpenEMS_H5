@@ -428,8 +428,14 @@ void sensors_tick_100ms() noexcept {
     g_data.an3_raw = 0u;
     g_data.an4_raw = 0u;
 
-    // TODO: VBATT via canal dedicado quando mapeamento elétrico for definido.
-    g_data.vbatt_mv = 12000u;
+    // VBATT via ADC2_IN13 (PC3) — divisor resistivo 10:1 (100k/10k)
+    // Raw 4095 = 3.3V × 10 = 33V (full scale)
+    // vbatt_mv = raw × 33000 / 4095 ≈ raw × 8.06
+    {
+        const uint16_t vbatt_raw = ems::hal::adc2_read(ems::hal::Adc2Channel::VBATT);
+        g_data.vbatt_mv = static_cast<uint16_t>(
+            (static_cast<uint32_t>(vbatt_raw) * 33000u) / 4095u);
+    }
 }
 
 void sensors_maf_freq_capture_isr(uint16_t period_ticks) noexcept {
