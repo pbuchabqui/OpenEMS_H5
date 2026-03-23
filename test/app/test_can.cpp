@@ -47,7 +47,8 @@ ems::drv::SensorData make_sensors() {
         4020u,   // oil_press_kpa_x10
         13800u,  // vbatt_mv
         0u,      // fault_bits
-        0u       // o2_mv
+        0u,      // o2_mv
+        0u, 0u, 0u, 0u,  // an1-4_raw
     };
 }
 

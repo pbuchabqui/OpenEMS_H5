@@ -176,13 +176,12 @@ void nvm_reset_knock_map() noexcept {
     g_knock_dirty = true;
 }
 
-bool nvm_save_calibration(uint8_t page, const uint8_t* data, uint16_t len) noexcept {
+NvmError nvm_save_calibration(uint8_t page, const uint8_t* data, uint16_t len) noexcept {
     if (page > 2u || data == nullptr || len == 0u) {
-        return false;
+        return NvmError::INVALID_PARAM;
     }
-    // Guard against buffer overflow: data + header must fit in one sector
     if (static_cast<uint32_t>(len) + kCalHdrSz > FLASH_SECTOR_SIZE) {
-        return false;
+        return NvmError::BUFFER_OVERFLOW;
     }
 
     const uint32_t sector = kSectorCal0 + page;
@@ -201,14 +200,21 @@ bool nvm_save_calibration(uint8_t page, const uint8_t* data, uint16_t len) noexc
     const uint32_t total32 = (total + 3u) & ~3u;
 
     flash_unlock_bank2();
-    const bool ok = flash_erase_sector(sector) && flash_write_words(dest, cal_write_buf, total32);
+    if (!flash_erase_sector(sector)) {
+        flash_lock_bank2();
+        return NvmError::ERASE_FAIL;
+    }
+    if (!flash_write_words(dest, cal_write_buf, total32)) {
+        flash_lock_bank2();
+        return NvmError::PROGRAM_FAIL;
+    }
     flash_lock_bank2();
-    return ok;
+    return NvmError::OK;
 }
 
-bool nvm_load_calibration(uint8_t page, uint8_t* data, uint16_t len) noexcept {
+NvmError nvm_load_calibration(uint8_t page, uint8_t* data, uint16_t len) noexcept {
     if (page > 2u || data == nullptr || len == 0u) {
-        return false;
+        return NvmError::INVALID_PARAM;
     }
 
     const uint32_t sector = kSectorCal0 + page;
@@ -217,22 +223,22 @@ bool nvm_load_calibration(uint8_t page, uint8_t* data, uint16_t len) noexcept {
     CalHeader hdr = {};
     std::memcpy(&hdr, reinterpret_cast<const void*>(src), kCalHdrSz);
     if (hdr.magic != kCalMagic) {
-        return false;
+        return NvmError::NOT_FOUND;
     }
 
     const uint8_t* flash_data = reinterpret_cast<const uint8_t*>(src + kCalHdrSz);
     const uint32_t computed_crc = crc32_buffer(flash_data, static_cast<uint32_t>(len));
     if (computed_crc != hdr.crc32) {
-        return false;
+        return NvmError::CRC_MISMATCH;
     }
 
     std::memcpy(data, flash_data, len);
-    return true;
+    return NvmError::OK;
 }
 
-bool nvm_flush_adaptive_maps() noexcept {
+NvmError nvm_flush_adaptive_maps() noexcept {
     if (!g_ltft_dirty && !g_knock_dirty) {
-        return true;
+        return NvmError::OK;
     }
 
     static uint8_t sector_buf[FLASH_SECTOR_SIZE] = {};
@@ -241,15 +247,19 @@ bool nvm_flush_adaptive_maps() noexcept {
     std::memcpy(sector_buf + 256u, g_knock_ram, 64u);
 
     flash_unlock_bank2();
-    const bool ok = flash_erase_sector(kSectorLtft) &&
-                    flash_write_words(kBank2Base, sector_buf, sizeof(sector_buf));
+    if (!flash_erase_sector(kSectorLtft)) {
+        flash_lock_bank2();
+        return NvmError::ERASE_FAIL;
+    }
+    if (!flash_write_words(kBank2Base, sector_buf, sizeof(sector_buf))) {
+        flash_lock_bank2();
+        return NvmError::PROGRAM_FAIL;
+    }
     flash_lock_bank2();
 
-    if (ok) {
-        g_ltft_dirty = false;
-        g_knock_dirty = false;
-    }
-    return ok;
+    g_ltft_dirty = false;
+    g_knock_dirty = false;
+    return NvmError::OK;
 }
 
 bool nvm_save_runtime_seed(const RuntimeSyncSeed* seed) noexcept {
@@ -390,16 +400,15 @@ void nvm_reset_knock_map() noexcept {
     std::memset(g_knock, 0, sizeof(g_knock));
 }
 
-bool nvm_save_calibration(uint8_t page, const uint8_t* data, uint16_t len) noexcept {
+NvmError nvm_save_calibration(uint8_t page, const uint8_t* data, uint16_t len) noexcept {
     if (page > 2u || data == nullptr || len == 0u) {
-        return false;
+        return NvmError::INVALID_PARAM;
     }
-    // Guard against buffer overflow: data + header must fit in buffer
     if (static_cast<uint32_t>(len) + kCalHdrSz > sizeof(g_cal[0])) {
-        return false;
+        return NvmError::BUFFER_OVERFLOW;
     }
     if (g_flash_busy) {
-        return false;
+        return NvmError::BUSY;
     }
 
     ++g_erase_cnt;
@@ -411,30 +420,30 @@ bool nvm_save_calibration(uint8_t page, const uint8_t* data, uint16_t len) noexc
     std::memset(g_cal[page], 0xFFu, sizeof(g_cal[page]));
     std::memcpy(g_cal[page], &hdr, kCalHdrSz);
     std::memcpy(g_cal[page] + kCalHdrSz, data, len);
-    return true;
+    return NvmError::OK;
 }
 
-bool nvm_load_calibration(uint8_t page, uint8_t* data, uint16_t len) noexcept {
+NvmError nvm_load_calibration(uint8_t page, uint8_t* data, uint16_t len) noexcept {
     if (page > 2u || data == nullptr || len == 0u) {
-        return false;
+        return NvmError::INVALID_PARAM;
     }
 
     CalHeader hdr = {};
     std::memcpy(&hdr, g_cal[page], kCalHdrSz);
     if (hdr.magic != kCalMagic) {
-        return false;
+        return NvmError::NOT_FOUND;
     }
     const uint32_t computed_crc = crc32_buffer(g_cal[page] + kCalHdrSz, static_cast<uint32_t>(len));
     if (computed_crc != hdr.crc32) {
-        return false;
+        return NvmError::CRC_MISMATCH;
     }
 
     std::memcpy(data, g_cal[page] + kCalHdrSz, len);
-    return true;
+    return NvmError::OK;
 }
 
-bool nvm_flush_adaptive_maps() noexcept {
-    return true;
+NvmError nvm_flush_adaptive_maps() noexcept {
+    return NvmError::OK;
 }
 
 bool nvm_save_runtime_seed(const RuntimeSyncSeed* seed) noexcept {

@@ -4,6 +4,7 @@
 
 #include "drv/ckp.h"
 #include "drv/sensors.h"
+#include "hal/nvm_error.h"
 
 namespace ems::hal {
 
@@ -16,9 +17,9 @@ bool nvm_write_knock(uint8_t rpm_i, uint8_t load_i, int8_t retard_deci_deg) noex
 int8_t nvm_read_knock(uint8_t rpm_i, uint8_t load_i) noexcept;
 void nvm_reset_knock_map() noexcept;
 
-bool nvm_save_calibration(uint8_t page, const uint8_t* data, uint16_t len) noexcept;
-bool nvm_load_calibration(uint8_t page, uint8_t* data, uint16_t len) noexcept;
-bool nvm_flush_adaptive_maps() noexcept;
+NvmError nvm_save_calibration(uint8_t page, const uint8_t* data, uint16_t len) noexcept;
+NvmError nvm_load_calibration(uint8_t page, uint8_t* data, uint16_t len) noexcept;
+NvmError nvm_flush_adaptive_maps() noexcept;
 
 void bkpsram_write_crash(const ems::drv::SensorData& s,
                          const ems::drv::CkpSnapshot& ckp) noexcept;

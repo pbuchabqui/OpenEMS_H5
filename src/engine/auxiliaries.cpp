@@ -2,6 +2,8 @@
 
 #include <cstdint>
 
+#include "util/clamp.h"
+
 #if __has_include("drv/ckp.h")
 #include "drv/ckp.h"
 #elif __has_include("ckp.h")
@@ -160,15 +162,7 @@ struct AuxState {
 
 static AuxState g = {};
 
-int16_t clamp_i16(int16_t v, int16_t lo, int16_t hi) noexcept {
-    if (v < lo) {
-        return lo;
-    }
-    if (v > hi) {
-        return hi;
-    }
-    return v;
-}
+using ems::util::clamp_i16;
 
 uint8_t axis_index_u16(const uint16_t* axis, uint8_t size, uint16_t x) noexcept {
     if (size < 2u) {

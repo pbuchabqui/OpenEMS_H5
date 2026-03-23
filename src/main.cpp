@@ -45,10 +45,17 @@ int main() { return 0; }
 #include "hal/runtime_seed.h"
 #include "hal/tim.h"
 #include "hal/usb_cdc.h"
+#include "util/clamp.h"
+
+using ems::util::elapsed;
 
 // =============================================================================
 // Estado de background (idêntico ao main.cpp Kinetis)
 // =============================================================================
+// Threading model: All g_* variables below are accessed exclusively from the
+// main loop (super-loop context). ISR-produced data is consumed via
+// ckp_snapshot() which uses a CPSID/CPSIE critical section for atomicity.
+// No volatile annotation is needed for these variables.
 
 static constexpr uint16_t kCalibPageBytes = 512u;
 alignas(4) static uint8_t g_calib_page0[kCalibPageBytes];
@@ -95,10 +102,6 @@ static constexpr uint32_t kDefaultSoiLeadDeg = 62u;
     *reinterpret_cast<volatile uint32_t*>(0xE000ED0Cu) =
         (0x5FAu << 16u) | (1u << 2u);
     for (;;) {}
-}
-
-static inline bool elapsed(uint32_t now, uint32_t last, uint32_t period) noexcept {
-    return static_cast<uint32_t>(now - last) >= period;
 }
 
 static inline void ts_service() noexcept {

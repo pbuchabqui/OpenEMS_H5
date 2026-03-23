@@ -2,21 +2,15 @@
 
 #include <cstdint>
 
+#include "util/clamp.h"
+
 namespace {
 
 constexpr uint8_t kDwellPoints = 8u;
 constexpr uint16_t kDwellVbattAxisMv[kDwellPoints] = {9000u, 10000u, 11000u, 12000u, 13000u, 14000u, 15000u, 16000u};
 constexpr uint16_t kDwellTableMsX10[kDwellPoints] = {42u, 38u, 35u, 30u, 28u, 25u, 23u, 22u};
 
-int16_t clamp_i16(int16_t v, int16_t lo, int16_t hi) noexcept {
-    if (v < lo) {
-        return lo;
-    }
-    if (v > hi) {
-        return hi;
-    }
-    return v;
-}
+using ems::util::clamp_i16;
 
 // Interpolação especializada para a tabela de dwell por tensão de bateria.
 // Separada da interp_u16_8pt genérica de fuel_calc.cpp (assinatura diferente:
