@@ -47,7 +47,8 @@ run_test test_sensors_validation \
 run_test test_fuel \
   test/engine/test_fuel.cpp \
   src/engine/fuel_calc.cpp \
-  src/engine/table3d.cpp
+  src/engine/table3d.cpp \
+  src/hal/flash_nvm.cpp
 
 # test_fuel_calc_assertions removed - file does not exist
 

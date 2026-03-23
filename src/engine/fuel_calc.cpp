@@ -3,6 +3,8 @@
 #include <cstdint>
 #include <cassert>
 
+#include "hal/flash_nvm.h"
+
 // CRITICAL FIX: Add debug assertions for safety-critical parameters
 #ifndef NDEBUG
 #define ASSERT_VALID_RPM_X10(rpm) assert((rpm) >= 0 && (rpm) <= 200000)  // 0-20000 RPM ×10
@@ -52,15 +54,16 @@ int32_t g_stft_integrator_x10 = 0;
 int16_t g_ltft_pct_x10[ems::engine::kTableAxisSize][ems::engine::kTableAxisSize] = {};
 
 int16_t fuel_ltft_load_cell(uint8_t map_idx, uint8_t rpm_idx) noexcept {
-    (void)map_idx;
-    (void)rpm_idx;
-    return 0;
+    // Read persisted LTFT value from Flash NVM (int8_t → int16_t ×10 scale)
+    return static_cast<int16_t>(ems::hal::nvm_read_ltft(rpm_idx, map_idx)) * 10;
 }
 
 void fuel_ltft_store_cell(uint8_t map_idx, uint8_t rpm_idx, int16_t value_x10) noexcept {
-    (void)map_idx;
-    (void)rpm_idx;
-    (void)value_x10;
+    // Persist LTFT value to Flash NVM (int16_t ×10 → int8_t, clamped)
+    int16_t val = value_x10 / 10;
+    if (val > 127) { val = 127; }
+    if (val < -128) { val = -128; }
+    static_cast<void>(ems::hal::nvm_write_ltft(rpm_idx, map_idx, static_cast<int8_t>(val)));
 }
 
 uint16_t clamp_u16(uint16_t v, uint16_t lo, uint16_t hi) noexcept {
