@@ -33,7 +33,6 @@ int main() { return 0; }
 #include "drv/scheduler.h"
 #include "drv/sensors.h"
 #include "engine/auxiliaries.h"
-#include "engine/cycle_sched.h"
 #include "engine/fuel_calc.h"
 #include "engine/ign_calc.h"
 #include "engine/knock.h"
@@ -91,7 +90,6 @@ static constexpr uint32_t kRuntimeSeedSaveDelayMs = 100u;
 static constexpr uint32_t kRuntimeSeedArmWindowMs = 2000u;
 static constexpr uint16_t kDefaultReqFuelUs = 8000u;
 static constexpr uint16_t kMapRefKpa        = 100u;
-static constexpr uint32_t kDefaultSoiLeadDeg = 62u;
 
 // =============================================================================
 // Utilitários
@@ -189,7 +187,6 @@ static void openems_init() noexcept {
     ems::engine::auxiliaries_init();
     ems::engine::knock_init();
     ems::engine::quick_crank_reset();
-    ems::engine::cycle_sched_init();
 
     // 8) Aplicação
     ems::app::ts_init();
@@ -222,7 +219,6 @@ static void openems_init() noexcept {
         if (snap.state == ems::drv::SyncState::SYNCED) { break; }
     }
 
-    ems::engine::cycle_sched_enable(true);
 }
 
 // =============================================================================
@@ -298,25 +294,6 @@ int main() {
                 const int16_t advance_deg10 =
                     ems::engine::get_advance(snap.rpm_x10, map_kpa);
                 g_last_advance_deg = static_cast<int8_t>(advance_deg10 / 10);
-
-                const uint16_t dwell_ms_x10 =
-                    ems::engine::dwell_ms_x10_from_vbatt(sensors.vbatt_mv);
-                const uint16_t dwell_angle_x10 =
-                    ems::engine::calc_dwell_angle_x10(
-                        dwell_ms_x10,
-                        static_cast<uint16_t>(snap.rpm_x10 / 10u));
-                const uint16_t dead_ticks = static_cast<uint16_t>(
-                    ems::engine::inj_pw_us_to_sched_ticks(dead_time_us) > 0xFFFFu
-                        ? 0xFFFFu
-                        : ems::engine::inj_pw_us_to_sched_ticks(dead_time_us));
-                const uint32_t inj_pw_ticks =
-                    ems::engine::inj_pw_us_to_sched_ticks(final_pw_us);
-                ems::engine::cycle_sched_update(
-                    inj_pw_ticks,
-                    dead_ticks,
-                    static_cast<uint16_t>(kDefaultSoiLeadDeg * 10u),
-                    advance_deg10,
-                    dwell_angle_x10);
             }
 
             // Limp mode: MAP ou CLT em fault

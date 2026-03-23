@@ -81,7 +81,7 @@ uint32_t ckp_angle_to_ticks(uint16_t angle_x10, uint32_t ref_capture) noexcept;
 // adicionar comportamento sem modificar este módulo).
 //
 // sensors_on_tooth  → drv/sensors.cpp  (amostragem sincronizada ao dente)
-// schedule_on_tooth → engine/cycle_sched.cpp (agendamento injeção/ignição)
+// schedule_on_tooth → (stub no-op; override para agendamento injeção/ignição)
 // prime_on_tooth    → engine/quick_crank.cpp (prime pulse — 5º dente de cranking)
 
 void sensors_on_tooth(const CkpSnapshot& snap) noexcept;

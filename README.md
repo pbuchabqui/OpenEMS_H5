@@ -236,7 +236,6 @@ OpenEMS_H5/
 │   │   ├── scheduler.cpp           # Scheduler absoluto v2.2
 │   │   └── sensors.cpp             # Processamento de sensores
 │   ├── engine/                     # Lógica de controle do motor
-│   │   ├── cycle_sched.cpp         # Scheduler angular existente
 │   │   ├── fuel_calc.cpp           # Cálculo de injeção
 │   │   ├── ign_calc.cpp            # Cálculo de ignição
 │   │   ├── knock.cpp               # Detecção de knock
