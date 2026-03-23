@@ -4,23 +4,9 @@
 
 #include "util/clamp.h"
 
-#if __has_include("drv/ckp.h")
 #include "drv/ckp.h"
-#elif __has_include("ckp.h")
-#include "ckp.h"
-#endif
-
-#if __has_include("drv/sensors.h")
 #include "drv/sensors.h"
-#elif __has_include("sensors.h")
-#include "sensors.h"
-#endif
-
-#if __has_include("hal/tim.h")
 #include "hal/tim.h"
-#elif __has_include("tim.h")
-#include "tim.h"
-#endif
 
 namespace {
 

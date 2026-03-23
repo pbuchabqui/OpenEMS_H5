@@ -2,11 +2,7 @@
 
 #include <cstdint>
 
-#if __has_include("hal/adc.h")
 #include "hal/adc.h"
-#elif __has_include("adc.h")
-#include "adc.h"
-#endif
 
 // =============================================================================
 // CORRECOES APLICADAS

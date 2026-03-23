@@ -142,7 +142,6 @@ static void openems_init() noexcept {
     // 4) Communications
     ems::hal::fdcan_init();
     ems::hal::usb_cdc_init();
-    ems::hal::usart3_init();  // ⚡ CORREÇÃO H4: USART3 debug serial (PC10/PC11, 115200)
 
     // 4b) BKIN safety test
     if (!ems::hal::bkin_test_tim1()) {
@@ -206,8 +205,8 @@ static void openems_init() noexcept {
     nvic_enable_irq(IRQ_TIM8_CC);
     nvic_set_priority(IRQ_TIM15,   4u);   // INJ4
     nvic_enable_irq(IRQ_TIM15);
-    nvic_set_priority(IRQ_ADC1_2,  5u);   // ⚡ CORREÇÃO H5: ADC DMA
-    nvic_enable_irq(IRQ_ADC1_2);
+    nvic_set_priority(IRQ_ADC1,  5u);     // ADC DMA
+    nvic_enable_irq(IRQ_ADC1);
     nvic_set_priority(IRQ_FDCAN1_IT0, 6u);  // ⚡ CORREÇÃO H5: CAN-FD RX
     nvic_enable_irq(IRQ_FDCAN1_IT0);
 
