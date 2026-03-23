@@ -4,6 +4,8 @@
 #include <cstdint>
 #include <cstring>
 
+#include "util/clamp.h"
+
 #include "app/can_stack.h"
 #include "drv/ckp.h"
 #include "drv/sensors.h"
@@ -142,15 +144,7 @@ inline bool rx_pop(uint8_t& byte) noexcept {
     return ok;
 }
 
-inline int16_t clamp_i16(int32_t v, int16_t lo, int16_t hi) noexcept {
-    if (v < lo) {
-        return lo;
-    }
-    if (v > hi) {
-        return hi;
-    }
-    return static_cast<int16_t>(v);
-}
+using ems::util::clamp_i16;
 
 inline uint8_t clamp_u8(uint32_t v) noexcept {
     return static_cast<uint8_t>((v > 255u) ? 255u : v);

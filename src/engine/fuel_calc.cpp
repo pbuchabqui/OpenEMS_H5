@@ -4,11 +4,12 @@
 #include <cassert>
 
 #include "hal/flash_nvm.h"
+#include "util/clamp.h"
 
 // CRITICAL FIX: Add debug assertions for safety-critical parameters
 #ifndef NDEBUG
 #define ASSERT_VALID_RPM_X10(rpm) assert((rpm) >= 0 && (rpm) <= 200000)  // 0-20000 RPM ×10
-#define ASSERT_VALID_MAP_KPA(map) assert((map) >= 10 && (map) <= 250)   // 10-250 kPa
+#define ASSERT_VALID_MAP_KPA(map) assert((map) >= 10 && (map) <= 300)   // 10-300 kPa
 #define ASSERT_VALID_TEMP_X10(temp) assert((temp) >= -400 && (temp) <= 1500)  // -40°C to +150°C ×10
 #define ASSERT_VALID_VE(ve) assert((ve) <= 255)  // VE 0-255%
 #define ASSERT_VALID_VOLTAGE_MV(v) assert((v) >= 6000 && (v) <= 18000)  // 6-18V
@@ -66,25 +67,8 @@ void fuel_ltft_store_cell(uint8_t map_idx, uint8_t rpm_idx, int16_t value_x10) n
     static_cast<void>(ems::hal::nvm_write_ltft(rpm_idx, map_idx, static_cast<int8_t>(val)));
 }
 
-uint16_t clamp_u16(uint16_t v, uint16_t lo, uint16_t hi) noexcept {
-    if (v < lo) {
-        return lo;
-    }
-    if (v > hi) {
-        return hi;
-    }
-    return v;
-}
-
-int16_t clamp_i16(int16_t v, int16_t lo, int16_t hi) noexcept {
-    if (v < lo) {
-        return lo;
-    }
-    if (v > hi) {
-        return hi;
-    }
-    return v;
-}
+using ems::util::clamp_u16;
+using ems::util::clamp_i16;
 
 uint16_t interp_u16_8pt(const int16_t* x_axis,
                         const uint16_t* table,

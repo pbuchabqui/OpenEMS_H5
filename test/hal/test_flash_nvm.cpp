@@ -4,7 +4,10 @@
 
 #define EMS_HOST_TEST 1
 #include "hal/flash_nvm.h"
+#include "hal/nvm_error.h"
 #include "hal/runtime_seed.h"
+
+using ems::hal::NvmError;
 
 namespace {
 
@@ -55,8 +58,8 @@ void test_calibration_save_load_roundtrip() {
         src[i] = static_cast<uint8_t>(i ^ 0x5Au);
     }
 
-    TEST_ASSERT_TRUE(ems::hal::nvm_save_calibration(2u, src, sizeof(src)));
-    TEST_ASSERT_TRUE(ems::hal::nvm_load_calibration(2u, dst, sizeof(dst)));
+    TEST_ASSERT_TRUE(ems::hal::nvm_save_calibration(2u, src, sizeof(src)) == NvmError::OK);
+    TEST_ASSERT_TRUE(ems::hal::nvm_load_calibration(2u, dst, sizeof(dst)) == NvmError::OK);
     TEST_ASSERT_TRUE(std::memcmp(src, dst, sizeof(src)) == 0);
     TEST_ASSERT_EQ_I32(1, ems::hal::nvm_test_erase_count());
     TEST_ASSERT_EQ_I32(1, ems::hal::nvm_test_program_count());
@@ -70,9 +73,9 @@ void test_calibration_rewrite_replaces_previous_data() {
     std::memset(first, 0xAA, sizeof(first));
     std::memset(second, 0x11, sizeof(second));
 
-    TEST_ASSERT_TRUE(ems::hal::nvm_save_calibration(0u, first, sizeof(first)));
-    TEST_ASSERT_TRUE(ems::hal::nvm_save_calibration(0u, second, sizeof(second)));
-    TEST_ASSERT_TRUE(ems::hal::nvm_load_calibration(0u, out, sizeof(out)));
+    TEST_ASSERT_TRUE(ems::hal::nvm_save_calibration(0u, first, sizeof(first)) == NvmError::OK);
+    TEST_ASSERT_TRUE(ems::hal::nvm_save_calibration(0u, second, sizeof(second)) == NvmError::OK);
+    TEST_ASSERT_TRUE(ems::hal::nvm_load_calibration(0u, out, sizeof(out)) == NvmError::OK);
     TEST_ASSERT_TRUE(std::memcmp(second, out, sizeof(out)) == 0);
     TEST_ASSERT_EQ_I32(2, ems::hal::nvm_test_erase_count());
     TEST_ASSERT_EQ_I32(2, ems::hal::nvm_test_program_count());
@@ -85,7 +88,7 @@ void test_timeout_when_ccif_busy() {
 
     uint8_t data[8] = {};
     ems::hal::nvm_test_set_ccif_busy_polls(2'000'000u);
-    TEST_ASSERT_TRUE(!ems::hal::nvm_save_calibration(1u, data, sizeof(data)));
+    TEST_ASSERT_TRUE(ems::hal::nvm_save_calibration(1u, data, sizeof(data)) == NvmError::BUSY);
     TEST_ASSERT_EQ_I32(0, ems::hal::nvm_test_erase_count());
     TEST_ASSERT_EQ_I32(0, ems::hal::nvm_test_program_count());
 }
@@ -93,14 +96,14 @@ void test_timeout_when_ccif_busy() {
 void test_invalid_calibration_parameters() {
     test_reset();
     uint8_t data[4] = {1u, 2u, 3u, 4u};
-    TEST_ASSERT_TRUE(!ems::hal::nvm_save_calibration(32u, data, sizeof(data)));
-    TEST_ASSERT_TRUE(!ems::hal::nvm_save_calibration(1u, nullptr, sizeof(data)));
-    TEST_ASSERT_TRUE(!ems::hal::nvm_save_calibration(1u, data, 0u));
+    TEST_ASSERT_TRUE(ems::hal::nvm_save_calibration(32u, data, sizeof(data)) == NvmError::INVALID_PARAM);
+    TEST_ASSERT_TRUE(ems::hal::nvm_save_calibration(1u, nullptr, sizeof(data)) == NvmError::INVALID_PARAM);
+    TEST_ASSERT_TRUE(ems::hal::nvm_save_calibration(1u, data, 0u) == NvmError::INVALID_PARAM);
 
     uint8_t out[4] = {};
-    TEST_ASSERT_TRUE(!ems::hal::nvm_load_calibration(32u, out, sizeof(out)));
-    TEST_ASSERT_TRUE(!ems::hal::nvm_load_calibration(1u, nullptr, sizeof(out)));
-    TEST_ASSERT_TRUE(!ems::hal::nvm_load_calibration(1u, out, 0u));
+    TEST_ASSERT_TRUE(ems::hal::nvm_load_calibration(32u, out, sizeof(out)) == NvmError::INVALID_PARAM);
+    TEST_ASSERT_TRUE(ems::hal::nvm_load_calibration(1u, nullptr, sizeof(out)) == NvmError::INVALID_PARAM);
+    TEST_ASSERT_TRUE(ems::hal::nvm_load_calibration(1u, out, 0u) == NvmError::INVALID_PARAM);
 }
 
 // ---------------------------------------------------------------------------
@@ -347,11 +350,11 @@ void test_runtime_seed_boot_compat_rejects_bad_crc() {
 void test_load_calibration_rejects_corrupted_sector() {
     test_reset();
     uint8_t src[16] = {1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16};
-    TEST_ASSERT_TRUE(ems::hal::nvm_save_calibration(0u, src, sizeof(src)));
+    TEST_ASSERT_TRUE(ems::hal::nvm_save_calibration(0u, src, sizeof(src)) == NvmError::OK);
 
     // Sanidade: load antes da corrupção deve funcionar
     uint8_t dst[16] = {};
-    TEST_ASSERT_TRUE(ems::hal::nvm_load_calibration(0u, dst, sizeof(dst)));
+    TEST_ASSERT_TRUE(ems::hal::nvm_load_calibration(0u, dst, sizeof(dst)) == NvmError::OK);
     TEST_ASSERT_TRUE(dst[0] == 1u);
 
     // Corromper CRC no CalHeader (bit-flip no byte 4 do setor)
@@ -359,7 +362,7 @@ void test_load_calibration_rejects_corrupted_sector() {
 
     // Load deve falhar e não modificar o buffer de destino
     uint8_t dst2[16] = {};
-    TEST_ASSERT_TRUE(!ems::hal::nvm_load_calibration(0u, dst2, sizeof(dst2)));
+    TEST_ASSERT_TRUE(ems::hal::nvm_load_calibration(0u, dst2, sizeof(dst2)) == NvmError::CRC_MISMATCH);
     TEST_ASSERT_TRUE(dst2[0] == 0u);
 }
 

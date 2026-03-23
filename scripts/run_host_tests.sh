@@ -4,7 +4,7 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 BUILD_DIR="${TMPDIR:-/tmp}/openems_host_tests"
 CXX_BIN="${CXX:-g++}"
-CXXFLAGS=(-std=c++17 -DEMS_HOST_TEST -Isrc)
+CXXFLAGS=(-std=c++17 -DEMS_HOST_TEST -Isrc -Wall -Wextra -Werror -Wno-attributes)
 
 mkdir -p "${BUILD_DIR}"
 
@@ -88,6 +88,17 @@ run_test test_flash_nvm \
 run_test test_cordic \
   test/hal/test_cordic.cpp \
   src/hal/cordic.cpp
+
+run_test test_fuel_boundary \
+  test/engine/test_fuel_boundary.cpp \
+  src/engine/fuel_calc.cpp \
+  src/engine/table3d.cpp \
+  src/hal/flash_nvm.cpp
+
+run_test test_scheduler_boundary \
+  test/drv/test_scheduler_boundary.cpp \
+  src/drv/scheduler.cpp \
+  src/hal/tim.cpp
 
 # test_ts_protocol, test_usb_cdc, test_ecu_sched, test_ecu_sched_fixes, test_pipeline_backbone
 # removed - depend on stub_ecu_sched_ivc.cpp and engine/ecu_sched.h which don't exist

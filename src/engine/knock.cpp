@@ -3,6 +3,7 @@
 #include <cstdint>
 
 #include "hal/flash_nvm.h"
+#include "util/clamp.h"
 
 namespace {
 
@@ -42,15 +43,7 @@ struct KnockState {
 
 static KnockState g = {};
 
-uint16_t clamp_u16(uint16_t v, uint16_t lo, uint16_t hi) noexcept {
-    if (v < lo) {
-        return lo;
-    }
-    if (v > hi) {
-        return hi;
-    }
-    return v;
-}
+using ems::util::clamp_u16;
 
 void cmp0_set_enabled(bool enable) noexcept {
     if (enable) {

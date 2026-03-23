@@ -3,6 +3,8 @@
 
 #include <cstdint>
 
+#include "util/clamp.h"
+
 namespace {
 
 struct P2 {
@@ -80,15 +82,7 @@ uint16_t interp_u16(const P2* table, uint8_t n, int16_t x) noexcept {
     return table[n - 1u].y;
 }
 
-uint16_t clamp_u16(uint32_t v, uint16_t lo, uint16_t hi) noexcept {
-    if (v < lo) {
-        return lo;
-    }
-    if (v > hi) {
-        return hi;
-    }
-    return static_cast<uint16_t>(v);
-}
+using ems::util::clamp_u16;
 
 bool detect_cranking(uint32_t rpm_x10, bool full_sync) noexcept {
     if (!full_sync || rpm_x10 == 0u) {

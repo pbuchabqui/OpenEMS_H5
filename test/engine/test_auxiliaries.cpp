@@ -31,6 +31,7 @@ ems::drv::SensorData g_sensors = {
     13500u,  // vbatt_mv
     0u,      // fault_bits
     0u,      // o2_mv
+    0u, 0u, 0u, 0u,  // an1-4_raw
 };
 
 uint32_t g_tim3_init_hz = 0u;
@@ -42,6 +43,7 @@ void reset_fixture() {
     g_snap = ems::drv::CkpSnapshot{62500u, 8u, 0u, 3000u, ems::drv::SyncState::SYNCED, true};
     g_sensors = ems::drv::SensorData{
         1000u, 0u, 700u, 900, 250, 3000u, 2500u, 13500u, 0u, 0u,
+        0u, 0u, 0u, 0u,
     };
     g_tim3_init_hz = 0u;
     g_tim12_init_hz = 0u;

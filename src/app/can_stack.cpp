@@ -3,6 +3,7 @@
 #include <cstdint>
 
 #include "hal/fdcan.h"
+#include "util/clamp.h"
 
 namespace {
 
@@ -14,19 +15,9 @@ static bool     g_wbo2_seen       = false;
 static bool     g_wbo2_fault      = true;
 static uint32_t g_last_tx_400_ms  = 0u;
 
-inline uint16_t clamp_u16(uint32_t v) noexcept {
-    return static_cast<uint16_t>((v > 65535u) ? 65535u : v);
-}
-
-inline int16_t clamp_i16(int32_t v) noexcept {
-    if (v < -32768) { return -32768; }
-    if (v > 32767)  { return 32767; }
-    return static_cast<int16_t>(v);
-}
-
-inline bool elapsed(uint32_t now_ms, uint32_t last_ms, uint32_t period_ms) noexcept {
-    return static_cast<uint32_t>(now_ms - last_ms) >= period_ms;
-}
+using ems::util::saturate_u16;
+using ems::util::saturate_i16;
+using ems::util::elapsed;
 
 // Crank angle per tooth in millidegrees for a 60-2 wheel:
 //   360° / 58 teeth × 1000 = 6206.897 ≈ 6207 millidegrees/tooth
@@ -81,13 +72,13 @@ inline void tx_0x400(const ems::drv::CkpSnapshot& ckp,
         ? static_cast<uint8_t>(status_bits | ems::app::STATUS_WBO2_FAULT)
         : static_cast<uint8_t>(status_bits & static_cast<uint8_t>(~ems::app::STATUS_WBO2_FAULT));
 
-    const uint16_t rpm = clamp_u16(ckp.rpm_x10 / 10u);
+    const uint16_t rpm = saturate_u16(ckp.rpm_x10 / 10u);
     const uint16_t advance_x10 =
-        static_cast<uint16_t>(clamp_i16(static_cast<int32_t>(advance_deg) * 10));
+        static_cast<uint16_t>(saturate_i16(static_cast<int32_t>(advance_deg) * 10));
     const uint16_t pw_us = static_cast<uint16_t>(pw_ms_x10 * 100u);
     const uint16_t lambda_x1000 = ems::app::can_stack_lambda_milli_safe(now_ms);
     const int16_t stft_pct_x10 =
-        clamp_i16(static_cast<int32_t>(stft_pct) * 10);
+        saturate_i16(static_cast<int32_t>(stft_pct) * 10);
     const uint32_t abs_crank_angle = static_cast<uint32_t>(ckp.tooth_index) * kCrankAnglePerToothMdeg;
 
     write_u16_le(&out.data[0], rpm);
