@@ -36,7 +36,6 @@ STM32_SRCS=(
     src/engine/table3d.cpp
     src/engine/auxiliaries.cpp
     src/engine/ecu_sched.cpp
-    src/engine/cycle_sched.cpp
     src/engine/knock.cpp
     src/engine/quick_crank.cpp
     src/app/tuner_studio.cpp

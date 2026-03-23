@@ -39,7 +39,6 @@ CPP_SRCS := \
     $(SRC_DIR)/engine/table3d.cpp \
     $(SRC_DIR)/engine/auxiliaries.cpp \
     $(SRC_DIR)/engine/ecu_sched.cpp \
-    $(SRC_DIR)/engine/cycle_sched.cpp \
     $(SRC_DIR)/engine/knock.cpp \
     $(SRC_DIR)/engine/quick_crank.cpp \
     $(SRC_DIR)/app/tuner_studio.cpp \
