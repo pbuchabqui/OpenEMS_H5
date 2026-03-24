@@ -74,11 +74,15 @@ run_test test_iacv \
 run_test test_knock \
   test/engine/test_knock.cpp \
   src/engine/knock.cpp \
+  src/hal/dac.cpp \
   src/hal/flash_nvm.cpp
 
 run_test test_can \
   test/app/test_can.cpp \
   src/app/can_stack.cpp \
+  src/engine/knock.cpp \
+  src/hal/dac.cpp \
+  src/hal/flash_nvm.cpp \
   src/hal/fdcan.cpp
 
 run_test test_flash_nvm \

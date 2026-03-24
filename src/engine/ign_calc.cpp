@@ -114,7 +114,7 @@ int16_t clamp_advance_deg(int16_t advance_deg) noexcept {
     // combustíveis com maior octanagem (ex.: E30). Linha de alta carga da
     // tabela de desenvolvimento chega a 70°; o clamp protege contra valores
     // excessivos. Ajustar após calibração em bancada.
-    return clamp_i16(advance_deg, -10, 40);
+    return clamp_i16(advance_deg, -10, 55);  // spec v2.2: max 55° for turbo/high-octane
 }
 
 int16_t calc_total_advance(int16_t base_advance_deg,

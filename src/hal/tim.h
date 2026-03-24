@@ -16,6 +16,7 @@ void tim12_pwm_init(uint32_t freq_hz) noexcept;
 
 uint32_t tim2_count() noexcept;
 uint32_t tim5_count() noexcept;
+uint16_t tim15_count() noexcept;
 
 void tim1_set_compare(uint8_t ch, uint16_t ticks) noexcept;
 void tim8_set_compare(uint8_t ch, uint16_t ticks) noexcept;
