@@ -297,6 +297,7 @@ static inline void gpio_set_analog(volatile uint32_t* moder, uint8_t pin) noexce
 
 // TIM1 — advanced timer (output compare ignição/injeção)
 #define TIM1_CR1   STM32_REG32(TIM1_BASE + TIM_CR1_OFF)
+#define TIM1_CR2   STM32_REG32(TIM1_BASE + TIM_CR2_OFF)
 #define TIM1_SMCR  STM32_REG32(TIM1_BASE + TIM_SMCR_OFF)
 #define TIM1_DIER  STM32_REG32(TIM1_BASE + TIM_DIER_OFF)
 #define TIM1_SR    STM32_REG32(TIM1_BASE + TIM_SR_OFF)
