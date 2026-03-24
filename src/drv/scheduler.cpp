@@ -36,18 +36,14 @@ constexpr uint8_t tim8_channel(Channel ch) noexcept {
 }
 
 void program_compare(Channel ch, uint32_t abs_ticks) noexcept {
+    // Hardware sync via ITR cascade: TIM5→TIM1→TIM15, TIM5→TIM8
+    // All slave timers' 16-bit counters match TIM5_CNT[15:0],
+    // so a simple cast gives the correct compare value.
     const uint16_t hw_ticks = static_cast<uint16_t>(abs_ticks);
     if (is_tim1(ch)) {
         ems::hal::tim1_set_compare(tim1_channel(ch), hw_ticks);
     } else if (is_tim15(ch)) {
-        // Software sync: TIM15 is free-running (no ITR from TIM5).
-        // Compute the delta from TIM5 and apply it to TIM15's current counter
-        // so the compare fires at the correct absolute time regardless of drift.
-        const uint32_t now5   = ems::hal::tim5_count();
-        const uint32_t delta  = abs_ticks - now5;               // unsigned wrap-safe
-        const uint16_t now15  = ems::hal::tim15_count();
-        const uint16_t target = static_cast<uint16_t>(now15 + static_cast<uint16_t>(delta));
-        ems::hal::tim15_set_compare(target);
+        ems::hal::tim15_set_compare(hw_ticks);
     } else {
         ems::hal::tim8_set_compare(tim8_channel(ch), hw_ticks);
     }

@@ -74,6 +74,10 @@ void init_tim1_compare() noexcept {
     // Isso permite a conversão (uint16_t)(abs_ticks) no scheduler.
     // STM32H5 ITR mapping: TIM5 → TIM1 = ITR3 (TS=011)
     TIM1_SMCR = (3u << 4) | (1u << 2);  // TS=011 (ITR3=TIM5), SMS=100 (reset mode)
+    // ⚡ Cascata TIM5→TIM1→TIM15: TIM1 propaga Update como TRGO para TIM15
+    // MMS=010 (Update event) → TRGO pulsa a cada overflow (262 µs @ 250 MHz)
+    // TIM15 usa ITR3=TIM1 em reset mode, sincronizando TIM15_CNT == TIM1_CNT
+    TIM1_CR2 = TIM_CR2_MMS_UPDATE;
     TIM1_EGR = 1u;
     nvic_set_priority(IRQ_TIM1_CC, 4u);
     nvic_enable_irq(IRQ_TIM1_CC);
@@ -120,7 +124,12 @@ void init_tim15_compare() noexcept {
     TIM15_CCMR1 = TIM_CCMR1_OC1M_FROZEN;
     TIM15_CCER = TIM_CCER_CC1E;
     TIM15_DIER = TIM_DIER_CC1IE;
-    TIM15_SMCR = 0u;
+    // ⚡ Cascata hardware: TIM5 → TIM1 → TIM15
+    // TIM15 não tem ITR direto para TIM5 (RM0481 §33.5).
+    // TIM15 ITR3 = TIM1. TIM1 emite TRGO=Update (configurado acima).
+    // SMS=100 (reset mode): TIM15 reseta em cada TRGO do TIM1.
+    // Resultado: TIM15_CNT == TIM1_CNT == TIM5_CNT[15:0] a qualquer instante.
+    TIM15_SMCR = (3u << 4) | (1u << 2);  // TS=011 (ITR3=TIM1), SMS=100 (reset mode)
     TIM15_EGR = 1u;
     nvic_set_priority(IRQ_TIM15, 4u);
     nvic_enable_irq(IRQ_TIM15);
@@ -221,7 +230,6 @@ void tim12_pwm_init(uint32_t freq_hz) noexcept { init_tim12_pwm(freq_hz); }
 
 uint32_t tim2_count() noexcept { return TIM2_CNT; }
 uint32_t tim5_count() noexcept { return TIM5_CNT; }
-uint16_t tim15_count() noexcept { return static_cast<uint16_t>(TIM15_CNT); }
 
 void tim1_set_compare(uint8_t ch, uint16_t ticks) noexcept {
     switch (ch) {
@@ -374,7 +382,6 @@ namespace ems::hal {
 
 static uint32_t g_mock_tim2_cnt = 0u;
 static uint32_t g_mock_tim5_cnt = 0u;
-static uint16_t g_mock_tim15_cnt = 0u;
 static uint16_t g_mock_tim1_ccr[3] = {};
 static uint16_t g_mock_tim8_ccr[4] = {};
 static uint16_t g_mock_tim15_ccr = 0u;
@@ -389,7 +396,6 @@ void tim3_pwm_init(uint32_t) noexcept {}
 void tim12_pwm_init(uint32_t) noexcept {}
 uint32_t tim2_count() noexcept { return g_mock_tim2_cnt; }
 uint32_t tim5_count() noexcept { return g_mock_tim5_cnt; }
-uint16_t tim15_count() noexcept { return g_mock_tim15_cnt; }
 void tim1_set_compare(uint8_t ch, uint16_t ticks) noexcept { if (ch < 3u) { g_mock_tim1_ccr[ch] = ticks; } }
 void tim8_set_compare(uint8_t ch, uint16_t ticks) noexcept { if (ch < 4u) { g_mock_tim8_ccr[ch] = ticks; } }
 void tim15_set_compare(uint16_t ticks) noexcept { g_mock_tim15_ccr = ticks; }
@@ -423,15 +429,12 @@ void tim_test_set_counter(uint8_t timer_group, uint32_t value) noexcept {
         g_mock_tim2_cnt = value;
     } else if (timer_group == 5u) {
         g_mock_tim5_cnt = value;
-    } else if (timer_group == 15u) {
-        g_mock_tim15_cnt = static_cast<uint16_t>(value);
     }
 }
 
 void tim_test_clear_all() noexcept {
     g_mock_tim2_cnt = 0u;
     g_mock_tim5_cnt = 0u;
-    g_mock_tim15_cnt = 0u;
     for (uint8_t i = 0u; i < 3u; ++i) {
         g_mock_tim1_ccr[i] = 0u;
     }
