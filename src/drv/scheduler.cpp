@@ -40,7 +40,14 @@ void program_compare(Channel ch, uint32_t abs_ticks) noexcept {
     if (is_tim1(ch)) {
         ems::hal::tim1_set_compare(tim1_channel(ch), hw_ticks);
     } else if (is_tim15(ch)) {
-        ems::hal::tim15_set_compare(hw_ticks);
+        // Software sync: TIM15 is free-running (no ITR from TIM5).
+        // Compute the delta from TIM5 and apply it to TIM15's current counter
+        // so the compare fires at the correct absolute time regardless of drift.
+        const uint32_t now5   = ems::hal::tim5_count();
+        const uint32_t delta  = abs_ticks - now5;               // unsigned wrap-safe
+        const uint16_t now15  = ems::hal::tim15_count();
+        const uint16_t target = static_cast<uint16_t>(now15 + static_cast<uint16_t>(delta));
+        ems::hal::tim15_set_compare(target);
     } else {
         ems::hal::tim8_set_compare(tim8_channel(ch), hw_ticks);
     }

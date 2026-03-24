@@ -34,8 +34,8 @@ void test_dwell_start_after_spark() {
 }
 
 void test_clamp_high_advance() {
-    // clamp_advance_deg limita a 40° BTDC (protecção contra tabelas excessivas).
-    TEST_ASSERT_EQ_I32(40, ems::engine::clamp_advance_deg(60));
+    // clamp_advance_deg limits to 55° BTDC (spec v2.2 for turbo/high-octane engines).
+    TEST_ASSERT_EQ_I32(55, ems::engine::clamp_advance_deg(60));
 }
 
 void test_clamp_low_advance() {

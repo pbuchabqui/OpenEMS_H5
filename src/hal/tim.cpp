@@ -221,6 +221,7 @@ void tim12_pwm_init(uint32_t freq_hz) noexcept { init_tim12_pwm(freq_hz); }
 
 uint32_t tim2_count() noexcept { return TIM2_CNT; }
 uint32_t tim5_count() noexcept { return TIM5_CNT; }
+uint16_t tim15_count() noexcept { return static_cast<uint16_t>(TIM15_CNT); }
 
 void tim1_set_compare(uint8_t ch, uint16_t ticks) noexcept {
     switch (ch) {
@@ -373,6 +374,7 @@ namespace ems::hal {
 
 static uint32_t g_mock_tim2_cnt = 0u;
 static uint32_t g_mock_tim5_cnt = 0u;
+static uint16_t g_mock_tim15_cnt = 0u;
 static uint16_t g_mock_tim1_ccr[3] = {};
 static uint16_t g_mock_tim8_ccr[4] = {};
 static uint16_t g_mock_tim15_ccr = 0u;
@@ -387,6 +389,7 @@ void tim3_pwm_init(uint32_t) noexcept {}
 void tim12_pwm_init(uint32_t) noexcept {}
 uint32_t tim2_count() noexcept { return g_mock_tim2_cnt; }
 uint32_t tim5_count() noexcept { return g_mock_tim5_cnt; }
+uint16_t tim15_count() noexcept { return g_mock_tim15_cnt; }
 void tim1_set_compare(uint8_t ch, uint16_t ticks) noexcept { if (ch < 3u) { g_mock_tim1_ccr[ch] = ticks; } }
 void tim8_set_compare(uint8_t ch, uint16_t ticks) noexcept { if (ch < 4u) { g_mock_tim8_ccr[ch] = ticks; } }
 void tim15_set_compare(uint16_t ticks) noexcept { g_mock_tim15_ccr = ticks; }
@@ -420,12 +423,15 @@ void tim_test_set_counter(uint8_t timer_group, uint32_t value) noexcept {
         g_mock_tim2_cnt = value;
     } else if (timer_group == 5u) {
         g_mock_tim5_cnt = value;
+    } else if (timer_group == 15u) {
+        g_mock_tim15_cnt = static_cast<uint16_t>(value);
     }
 }
 
 void tim_test_clear_all() noexcept {
     g_mock_tim2_cnt = 0u;
     g_mock_tim5_cnt = 0u;
+    g_mock_tim15_cnt = 0u;
     for (uint8_t i = 0u; i < 3u; ++i) {
         g_mock_tim1_ccr[i] = 0u;
     }

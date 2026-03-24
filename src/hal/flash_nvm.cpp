@@ -6,14 +6,12 @@
 
 namespace {
 
+// CrashStore is used by the EMS_HOST_TEST path (defined below in #else block)
 struct CrashStore {
     ems::drv::SensorData sensors;
     ems::drv::CkpSnapshot ckp;
     bool valid;
 };
-
-static CrashStore g_crash_store = {};
-static uint32_t g_boot_count = 0u;
 
 }  // namespace
 
@@ -28,6 +26,23 @@ static int8_t g_ltft_ram[16][16] = {};
 static int8_t g_knock_ram[8][8] = {};
 static bool g_ltft_dirty = false;
 static bool g_knock_dirty = false;
+
+// Backup SRAM layout (0x38800000, 4 KB, VBAT-maintained)
+// [0x000..0x003] magic  — 0xDEADBEEF = valid crash data
+// [0x004..0x007] boot_count — incremented each boot
+// [0x008..0x0FF] crash log  — SensorData then CkpSnapshot
+static constexpr uint32_t kBkpSramBase   = 0x38800000u;
+static constexpr uint32_t kBkpMagicOff   = 0x000u;
+static constexpr uint32_t kBkpBootCntOff = 0x004u;
+static constexpr uint32_t kBkpCrashOff   = 0x008u;
+static constexpr uint32_t kBkpMagicValid = 0xDEADBEEFu;
+
+static inline volatile uint32_t* bkpsram_u32(uint32_t off) noexcept {
+    return reinterpret_cast<volatile uint32_t*>(kBkpSramBase + off);
+}
+static inline volatile uint8_t* bkpsram_u8(uint32_t off) noexcept {
+    return reinterpret_cast<volatile uint8_t*>(kBkpSramBase + off);
+}
 
 static constexpr uint32_t kSectorLtft = 0u;
 static constexpr uint32_t kSectorCal0 = 1u;
@@ -132,7 +147,9 @@ static bool flash_write_words(uint32_t dest_addr,
 namespace ems::hal {
 
 void flash_nvm_init() noexcept {
-    ++g_boot_count;
+    // Increment boot counter in backup SRAM (persists across resets via VBAT)
+    volatile uint32_t* cnt = bkpsram_u32(kBkpBootCntOff);
+    *cnt = *cnt + 1u;
 }
 
 bool nvm_write_ltft(uint8_t rpm_i, uint8_t load_i, int8_t val) noexcept {
@@ -299,23 +316,38 @@ bool nvm_clear_runtime_seed() noexcept {
 
 void bkpsram_write_crash(const ems::drv::SensorData& s,
                          const ems::drv::CkpSnapshot& ckp) noexcept {
-    g_crash_store.sensors = s;
-    g_crash_store.ckp = ckp;
-    g_crash_store.valid = true;
+    // Invalidate magic first (partial-write guard)
+    *bkpsram_u32(kBkpMagicOff) = 0u;
+    // Copy SensorData byte-by-byte to volatile backup SRAM
+    const uint8_t* s_src = reinterpret_cast<const uint8_t*>(&s);
+    volatile uint8_t* dst = bkpsram_u8(kBkpCrashOff);
+    for (uint32_t i = 0u; i < sizeof(ems::drv::SensorData); ++i) {
+        dst[i] = s_src[i];
+    }
+    // Copy CkpSnapshot immediately after SensorData
+    const uint8_t* c_src = reinterpret_cast<const uint8_t*>(&ckp);
+    volatile uint8_t* cdst = bkpsram_u8(kBkpCrashOff + sizeof(ems::drv::SensorData));
+    for (uint32_t i = 0u; i < sizeof(ems::drv::CkpSnapshot); ++i) {
+        cdst[i] = c_src[i];
+    }
+    // Set magic last (atomic commit — reader checks this first)
+    *bkpsram_u32(kBkpMagicOff) = kBkpMagicValid;
 }
 
 bool bkpsram_read_crash(ems::drv::SensorData& s,
                         ems::drv::CkpSnapshot& ckp) noexcept {
-    if (!g_crash_store.valid) {
+    if (*bkpsram_u32(kBkpMagicOff) != kBkpMagicValid) {
         return false;
     }
-    s = g_crash_store.sensors;
-    ckp = g_crash_store.ckp;
+    const volatile uint8_t* src = bkpsram_u8(kBkpCrashOff);
+    std::memcpy(&s, const_cast<const uint8_t*>(src), sizeof(ems::drv::SensorData));
+    const volatile uint8_t* csrc = bkpsram_u8(kBkpCrashOff + sizeof(ems::drv::SensorData));
+    std::memcpy(&ckp, const_cast<const uint8_t*>(csrc), sizeof(ems::drv::CkpSnapshot));
     return true;
 }
 
 uint32_t bkpsram_boot_count() noexcept {
-    return g_boot_count;
+    return *bkpsram_u32(kBkpBootCntOff);
 }
 
 }  // namespace ems::hal
@@ -343,6 +375,9 @@ static bool g_flash_busy = false;
 static uint32_t g_ccif_busy_polls = 0u;
 static RuntimeSyncSeed g_seed_slots[kTestSeedSlots] = {};
 static bool g_seed_slot_valid[kTestSeedSlots] = {};
+// Mock backup SRAM for host test (replaces hardware 0x38800000)
+static CrashStore g_crash_store = {};
+static uint32_t g_boot_count = 0u;
 
 static uint32_t crc32_buffer(const uint8_t* data, uint32_t len) noexcept {
     uint32_t crc = 0xFFFFFFFFu;

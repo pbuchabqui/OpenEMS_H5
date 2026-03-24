@@ -18,14 +18,14 @@ void knock_set_event_threshold(uint8_t threshold) noexcept;
 void knock_window_open(uint8_t cyl) noexcept;
 void knock_window_close(uint8_t cyl) noexcept;
 
-// ISR do comparador (CMP0): conta apenas quando janela estiver ativa.
+// Knock comparator ISR: counts only when window is active.
 void knock_cmp0_isr() noexcept;
 
 // Fecha o ciclo de combustao do cilindro e aplica algoritmo.
 void knock_cycle_complete(uint8_t cyl) noexcept;
 
 uint16_t knock_get_retard_x10(uint8_t cyl) noexcept;
-uint8_t knock_get_vosel() noexcept;
+uint16_t knock_get_threshold() noexcept;  // 12-bit DAC threshold (0..4095)
 
 #if defined(EMS_HOST_TEST)
 uint8_t knock_test_get_knock_count(uint8_t cyl) noexcept;

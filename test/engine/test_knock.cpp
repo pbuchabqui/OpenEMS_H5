@@ -35,15 +35,16 @@ void inject_knock_events(uint8_t cyl, uint8_t n) {
     ems::engine::knock_window_close(cyl);
 }
 
-void test_retard_step_and_vosel_drop_on_knock() {
+void test_retard_step_and_threshold_drop_on_knock() {
     ems::engine::knock_init();
-    const uint8_t vosel0 = ems::engine::knock_get_vosel();
+    const uint16_t thr0 = ems::engine::knock_get_threshold();
 
-    inject_knock_events(0u, 4u);  // threshold default = 3
+    inject_knock_events(0u, 4u);  // event_threshold default = 3, so 4 > 3 triggers
     ems::engine::knock_cycle_complete(0u);
 
     TEST_ASSERT_EQ_U32(20u, ems::engine::knock_get_retard_x10(0u));
-    TEST_ASSERT_EQ_U32(static_cast<uint32_t>(vosel0 - 2u), ems::engine::knock_get_vosel());
+    // threshold drops by kThresholdStepUp=130 after knock
+    TEST_ASSERT_EQ_U32(static_cast<uint32_t>(thr0 - 130u), ems::engine::knock_get_threshold());
 }
 
 void test_retard_clamps_at_10deg() {
@@ -72,15 +73,16 @@ void test_recovery_after_10_clean_cycles() {
     TEST_ASSERT_EQ_U32(19u, ems::engine::knock_get_retard_x10(2u));
 }
 
-void test_vosel_rises_after_100_clean_cycles() {
+void test_threshold_rises_after_100_clean_cycles() {
     ems::engine::knock_init();
-    const uint8_t vosel0 = ems::engine::knock_get_vosel();
+    const uint16_t thr0 = ems::engine::knock_get_threshold();
 
     for (uint8_t i = 0u; i < 100u; ++i) {
         ems::engine::knock_cycle_complete(3u);
     }
 
-    TEST_ASSERT_EQ_U32(static_cast<uint32_t>(vosel0 + 1u), ems::engine::knock_get_vosel());
+    // threshold rises by kThresholdStepDown=65 after 100 global clean cycles
+    TEST_ASSERT_EQ_U32(static_cast<uint32_t>(thr0 + 65u), ems::engine::knock_get_threshold());
 }
 
 void test_cmp_events_count_only_inside_window() {
@@ -100,10 +102,10 @@ void test_cmp_events_count_only_inside_window() {
 }  // namespace
 
 int main() {
-    test_retard_step_and_vosel_drop_on_knock();
+    test_retard_step_and_threshold_drop_on_knock();
     test_retard_clamps_at_10deg();
     test_recovery_after_10_clean_cycles();
-    test_vosel_rises_after_100_clean_cycles();
+    test_threshold_rises_after_100_clean_cycles();
     test_cmp_events_count_only_inside_window();
 
     std::printf("tests=%d failed=%d\n", g_tests_run, g_tests_failed);

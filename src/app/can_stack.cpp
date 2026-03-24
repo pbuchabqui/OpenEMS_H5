@@ -2,6 +2,7 @@
 
 #include <cstdint>
 
+#include "engine/knock.h"
 #include "hal/fdcan.h"
 #include "util/clamp.h"
 
@@ -66,7 +67,7 @@ inline void tx_0x400(const ems::drv::CkpSnapshot& ckp,
     out.id = 0x400u;
     out.dlc_bytes = 48u;
     out.extended = false;
-    out.brs = false;
+    out.brs = true;   // BRS: 500 kbps arbitration → 2.5 Mbps data phase
 
     const uint8_t effective_status = g_wbo2_fault
         ? static_cast<uint8_t>(status_bits | ems::app::STATUS_WBO2_FAULT)
@@ -95,10 +96,11 @@ inline void tx_0x400(const ems::drv::CkpSnapshot& ckp,
     write_u16_le(&out.data[22], sensors.vbatt_mv);
     write_u32_le(&out.data[24], abs_crank_angle);
     write_u32_le(&out.data[28], ckp.tooth_period_ticks);
-    out.data[32] = 0u;
-    out.data[33] = 0u;
-    out.data[34] = 0u;
-    out.data[35] = 0u;
+    // Knock retard per cylinder (units: 0.1°, max 10.0°)
+    out.data[32] = static_cast<uint8_t>(ems::engine::knock_retard_x10[0] > 255u ? 255u : ems::engine::knock_retard_x10[0]);
+    out.data[33] = static_cast<uint8_t>(ems::engine::knock_retard_x10[1] > 255u ? 255u : ems::engine::knock_retard_x10[1]);
+    out.data[34] = static_cast<uint8_t>(ems::engine::knock_retard_x10[2] > 255u ? 255u : ems::engine::knock_retard_x10[2]);
+    out.data[35] = static_cast<uint8_t>(ems::engine::knock_retard_x10[3] > 255u ? 255u : ems::engine::knock_retard_x10[3]);
     out.data[36] = effective_status;
     out.data[37] = sensors.fault_bits;
     write_u32_le(&out.data[38], now_ms);
