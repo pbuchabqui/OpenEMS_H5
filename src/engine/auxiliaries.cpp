@@ -88,31 +88,24 @@ constexpr int16_t kVvtEscTargetDegX10[kVvtPts][kVvtPts] = {
 };
 
 #if defined(EMS_HOST_TEST)
-volatile uint32_t ems_test_portb_pddr = 0u;
-volatile uint32_t ems_test_fgpiob_psor = 0u;
-volatile uint32_t ems_test_fgpiob_pcor = 0u;
-volatile uint32_t ems_test_sim_scgc5 = 0u;
-volatile uint32_t ems_test_portb_pcr16 = 0u;
-volatile uint32_t ems_test_portb_pcr17 = 0u;
-#define GPIOB_PDDR ems_test_portb_pddr
-#define FGPIOB_PSOR ems_test_fgpiob_psor
-#define FGPIOB_PCOR ems_test_fgpiob_pcor
-#define SIM_SCGC5 ems_test_sim_scgc5
-#define PORTB_PCR16 ems_test_portb_pcr16
-#define PORTB_PCR17 ems_test_portb_pcr17
+volatile uint32_t ems_test_gpiob_moder = 0u;
+volatile uint32_t ems_test_gpiob_bsrr = 0u;
+#define GPIOB_MODER ems_test_gpiob_moder
+#define GPIOB_BSRR ems_test_gpiob_bsrr
 #else
-#define GPIOB_PDDR (*reinterpret_cast<volatile uint32_t*>(0xF80FF054u))
-#define FGPIOB_PSOR (*reinterpret_cast<volatile uint32_t*>(0xF80FF044u))
-#define FGPIOB_PCOR (*reinterpret_cast<volatile uint32_t*>(0xF80FF048u))
-#define SIM_SCGC5 (*reinterpret_cast<volatile uint32_t*>(0x40048038u))
-#define PORTB_PCR16 (*reinterpret_cast<volatile uint32_t*>(0x4004A040u))
-#define PORTB_PCR17 (*reinterpret_cast<volatile uint32_t*>(0x4004A044u))
+#include "hal/regs.h"
+// STM32H5 GPIOB registers (RM0481 §17)
+// GPIOB_MODER: Pin mode register (0x42020400 + 0x00)
+// GPIOB_BSRR: Bit set/reset register (0x42020400 + 0x18)
+#define GPIOB_MODER STM32_REG32(GPIOB_BASE + GPIO_MODER_OFF)
+#define GPIOB_BSRR  STM32_REG32(GPIOB_BASE + GPIO_BSRR_OFF)
 #endif
 
-constexpr uint32_t SIM_SCGC5_PORTB_MASK = (1u << 10u);
-constexpr uint32_t PCR_MUX_GPIO = (1u << 8u);
-constexpr uint32_t kFanBit = (1u << 16u);
-constexpr uint32_t kPumpBit = (1u << 17u);
+// Pin assignments for STM32H5:
+// PB6 = Fan output (directly on GPIOB)
+// PB9 = Fuel pump output (directly on GPIOB)
+constexpr uint32_t kFanBit = (1u << 6u);
+constexpr uint32_t kPumpBit = (1u << 9u);
 
 struct AuxState {
     bool key_on;
@@ -281,19 +274,21 @@ int16_t lookup_vvt_target(const int16_t table[kVvtPts][kVvtPts],
 
 void set_fan(bool on) noexcept {
     g.fan_on = on;
+    // STM32H5 GPIO BSRR: lower 16 bits SET, upper 16 bits RESET
     if (on) {
-        FGPIOB_PSOR = kFanBit;
+        GPIOB_BSRR = kFanBit;                    // Set PB6
     } else {
-        FGPIOB_PCOR = kFanBit;
+        GPIOB_BSRR = (kFanBit << 16u);           // Reset PB6
     }
 }
 
 void set_pump(bool on) noexcept {
     g.pump_on = on;
+    // STM32H5 GPIO BSRR: lower 16 bits SET, upper 16 bits RESET
     if (on) {
-        FGPIOB_PSOR = kPumpBit;
+        GPIOB_BSRR = kPumpBit;                   // Set PB9
     } else {
-        FGPIOB_PCOR = kPumpBit;
+        GPIOB_BSRR = (kPumpBit << 16u);          // Reset PB9
     }
 }
 
@@ -522,10 +517,11 @@ void auxiliaries_init() noexcept {
     ems::hal::tim12_set_duty(0u, 0u);
     ems::hal::tim12_set_duty(1u, 0u);
 
-    SIM_SCGC5 |= SIM_SCGC5_PORTB_MASK;
-    PORTB_PCR16 = PCR_MUX_GPIO;
-    PORTB_PCR17 = PCR_MUX_GPIO;
-    GPIOB_PDDR |= (kFanBit | kPumpBit);
+    // STM32H5: Configure PB6 (Fan) and PB9 (Pump) as GPIO outputs
+    // MODER: 01b = General purpose output mode
+    // Each pin uses 2 bits: PB6 = bits [13:12], PB9 = bits [19:18]
+    GPIOB_MODER = (GPIOB_MODER & ~(0x3u << 12u)) | (0x1u << 12u);  // PB6 output
+    GPIOB_MODER = (GPIOB_MODER & ~(0x3u << 18u)) | (0x1u << 18u);  // PB9 output
 
     set_fan(false);
     set_pump(false);
