@@ -39,6 +39,7 @@ int main() { return 0; }
 #include "engine/quick_crank.h"
 #include "hal/adc.h"
 #include "hal/cordic.h"
+#include "hal/dac.h"
 #include "hal/fdcan.h"
 #include "hal/flash_nvm.h"
 #include "hal/runtime_seed.h"
@@ -72,6 +73,13 @@ static constexpr uint32_t kLimpRpmLimit_x10 = 30000u;
 static constexpr uint8_t  kFaultBitMap = (1u << 0u);
 static constexpr uint8_t  kFaultBitClt = (1u << 3u);
 static bool g_limp_active = false;
+
+// Overrun fuel cut parameters
+static constexpr uint16_t kOverrunCutRpmX10 = 1500u;      // Min RPM for overrun cut (1500 RPM)
+static constexpr uint16_t kOverrunCutTpsX10 = 50u;        // Max TPS for overrun cut (5%)
+static constexpr int16_t  kOverrunCutCltX10 = 600;        // Min CLT for overrun cut (60°C)
+static constexpr uint16_t kOverrunCutResumeTpsX10 = 100u; // TPS to resume fuel (10%)
+static bool g_overrun_fuel_cut = false;
 static bool g_engine_was_running = false;
 static bool g_runtime_seed_saved_for_stop = false;
 static bool g_runtime_seed_arm_window_active = false;
@@ -338,9 +346,11 @@ int main() {
             const auto sensors = ems::drv::sensors_get();
 
             if (snap.state == ems::drv::SyncState::SYNCED) {
+                const uint16_t map_kpa = sensors.map_kpa_x10 / 10u;
+                const int16_t lambda_target = ems::engine::get_lambda_target(snap.rpm_x10, map_kpa);
                 ems::engine::fuel_update_stft(
-                    snap.rpm_x10, sensors.map_kpa_x10 / 10u,
-                    1000,
+                    snap.rpm_x10, map_kpa,
+                    lambda_target,
                     static_cast<int16_t>(
                         ems::app::can_stack_lambda_milli_safe(now)),
                     sensors.clt_degc_x10,

@@ -70,6 +70,19 @@ int16_t lerp_q8_i16(int16_t a, int16_t b, uint8_t frac_q8) noexcept {
 
 namespace ems::engine {
 
+// ============================================================================
+// DEVELOPMENT DEFAULTS — REQUIRES CALIBRATION ON ENGINE DYNO
+// ============================================================================
+// These values are placeholders for initial development and testing.
+// Actual ignition timing varies with: combustion chamber design, fuel octane,
+// compression ratio, boost pressure, cam timing, and individual engine
+// characteristics. Incorrect timing can cause engine damage from knock
+// or detonation.
+//
+// BEFORE PRODUCTION USE: This table MUST be calibrated on an engine
+// dynamometer using knock detection. Start conservative and advance
+// gradually while monitoring for knock.
+// ============================================================================
 int8_t spark_table[kTableAxisSize][kTableAxisSize] = {
     {40, 40, 40, 40, 40, 40, 40, 40, 40, 40, 40, 40, 40, 40, 40, 40},
     {42, 42, 42, 42, 42, 42, 42, 42, 42, 42, 42, 42, 42, 42, 42, 42},

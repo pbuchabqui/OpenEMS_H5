@@ -54,6 +54,25 @@ int16_t g_stft_pct_x10 = 0;
 int32_t g_stft_integrator_x10 = 0;
 int16_t g_ltft_pct_x10[ems::engine::kTableAxisSize][ems::engine::kTableAxisSize] = {};
 
+// Lambda target table: lambda × 1000
+// Rows: MAP kPa (low load → high load)
+// Columns: RPM ×10 (low RPM → high RPM)
+// Values: 1000 = stoichiometric (λ=1.0), 850 = rich (λ=0.85), 1150 = lean (λ=1.15)
+constexpr int16_t kLambdaTargetX1000[8][8] = {
+    // 1000   2000   3000   4000   5000   6000   7000   8000  RPM×10
+    {  1000,  1000,  1000,  1000,  1000,  1000,  1000,  1000 },  // 20 kPa (idle/cruise)
+    {  1000,  1000,  1000,  1000,  1000,  1000,  1000,  1000 },  // 40 kPa
+    {  1000,  1000,  1000,  1000,  1000,  1000,  1000,  1000 },  // 60 kPa
+    {   980,   970,   960,   950,   940,   930,   920,   910 },  // 80 kPa (light load)
+    {   920,   910,   900,   890,   880,   870,   860,   850 },  // 100 kPa (WOT NA)
+    {   880,   870,   860,   850,   850,   850,   850,   850 },  // 150 kPa (boost)
+    {   850,   850,   850,   850,   850,   850,   850,   850 },  // 200 kPa (boost)
+    {   820,   820,   820,   820,   820,   820,   820,   820 },  // 250 kPa (high boost)
+};
+
+constexpr uint16_t kLambdaRpmAxisX10[8] = {1000u, 2000u, 3000u, 4000u, 5000u, 6000u, 7000u, 8000u};
+constexpr uint16_t kLambdaLoadAxisKpa[8] = {20u, 40u, 60u, 80u, 100u, 150u, 200u, 250u};
+
 int16_t fuel_ltft_load_cell(uint8_t map_idx, uint8_t rpm_idx) noexcept {
     // Read persisted LTFT value from Flash NVM (int8_t → int16_t ×10 scale)
     return static_cast<int16_t>(ems::hal::nvm_read_ltft(rpm_idx, map_idx)) * 10;
@@ -170,6 +189,17 @@ bool closed_loop_allowed(int16_t clt_x10,
 
 namespace ems::engine {
 
+// ============================================================================
+// DEVELOPMENT DEFAULTS — REQUIRES CALIBRATION ON ENGINE DYNO
+// ============================================================================
+// These values are placeholders for initial development and testing.
+// Actual VE varies with: intake runner geometry, cam timing, exhaust
+// backpressure, valve events, and individual engine characteristics.
+// 
+// BEFORE PRODUCTION USE: This table MUST be calibrated on an engine
+// dynamometer using wideband O2 feedback. Incorrect VE values will
+// cause incorrect fuel delivery, potentially damaging the engine.
+// ============================================================================
 uint8_t ve_table[kTableAxisSize][kTableAxisSize] = {
     {50u, 50u, 50u, 50u, 50u, 50u, 50u, 50u, 50u, 50u, 50u, 50u, 50u, 50u, 50u, 50u},
     {54u, 54u, 54u, 54u, 54u, 54u, 54u, 54u, 54u, 54u, 54u, 54u, 54u, 54u, 54u, 54u},
@@ -380,6 +410,65 @@ int16_t fuel_get_ltft_pct_x10(uint8_t map_idx, uint8_t rpm_idx) noexcept {
         return 0;
     }
     return g_ltft_pct_x10[map_idx][rpm_idx];
+}
+
+int16_t get_lambda_target(uint16_t rpm_x10, uint16_t map_kpa) noexcept {
+    // Bilinear interpolation on 8×8 lambda target table
+    // Returns lambda × 1000 (e.g., 1000 = λ1.0, 850 = λ0.85)
+    ASSERT_VALID_RPM_X10(rpm_x10);
+    ASSERT_VALID_MAP_KPA(map_kpa);
+
+    // Clamp to table axes
+    const uint16_t rpm = clamp_u16(rpm_x10, kLambdaRpmAxisX10[0], kLambdaRpmAxisX10[7]);
+    const uint16_t load = clamp_u16(map_kpa, kLambdaLoadAxisKpa[0], kLambdaLoadAxisKpa[7]);
+
+    // Find RPM axis indices
+    uint8_t rpm_idx = 0u;
+    for (uint8_t i = 0u; i < 7u; ++i) {
+        if (rpm <= kLambdaRpmAxisX10[i + 1u]) {
+            rpm_idx = i;
+            break;
+        }
+    }
+
+    // Find load axis indices
+    uint8_t load_idx = 0u;
+    for (uint8_t i = 0u; i < 7u; ++i) {
+        if (load <= kLambdaLoadAxisKpa[i + 1u]) {
+            load_idx = i;
+            break;
+        }
+    }
+
+    // Bilinear interpolation
+    const uint16_t x0 = kLambdaRpmAxisX10[rpm_idx];
+    const uint16_t x1 = kLambdaRpmAxisX10[rpm_idx + 1u];
+    const uint16_t y0 = kLambdaLoadAxisKpa[load_idx];
+    const uint16_t y1 = kLambdaLoadAxisKpa[load_idx + 1u];
+
+    const int16_t v00 = kLambdaTargetX1000[load_idx][rpm_idx];
+    const int16_t v10 = kLambdaTargetX1000[load_idx][rpm_idx + 1u];
+    const int16_t v01 = kLambdaTargetX1000[load_idx + 1u][rpm_idx];
+    const int16_t v11 = kLambdaTargetX1000[load_idx + 1u][rpm_idx + 1u];
+
+    // Interpolate along RPM axis
+    const uint32_t dx = static_cast<uint32_t>(rpm - x0);
+    const uint32_t span_x = static_cast<uint32_t>(x1 - x0);
+    const int32_t v0 = (span_x > 0) ? 
+        static_cast<int32_t>(v00) + ((static_cast<int32_t>(v10 - v00) * static_cast<int32_t>(dx)) / static_cast<int32_t>(span_x)) :
+        static_cast<int32_t>(v00);
+    const int32_t v1 = (span_x > 0) ?
+        static_cast<int32_t>(v01) + ((static_cast<int32_t>(v11 - v01) * static_cast<int32_t>(dx)) / static_cast<int32_t>(span_x)) :
+        static_cast<int32_t>(v01);
+
+    // Interpolate along load axis
+    const uint32_t dy = static_cast<uint32_t>(load - y0);
+    const uint32_t span_y = static_cast<uint32_t>(y1 - y0);
+    const int32_t result = (span_y > 0) ?
+        v0 + ((v1 - v0) * static_cast<int32_t>(dy)) / static_cast<int32_t>(span_y) :
+        v0;
+
+    return static_cast<int16_t>(result);
 }
 
 }  // namespace ems::engine

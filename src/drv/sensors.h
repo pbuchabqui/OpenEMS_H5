@@ -55,6 +55,7 @@ void sensors_tick_100ms() noexcept;
 void sensors_maf_freq_capture_isr(uint16_t period_ticks) noexcept;
 void sensors_set_tps_cal(uint16_t raw_min, uint16_t raw_max) noexcept;
 void sensors_set_range(SensorId id, SensorRange range) noexcept;
+void sensors_set_map_fallback_kpa_x10(uint16_t kpa_x10) noexcept;
 const SensorData& sensors_get() noexcept;
 
 // CRITICAL FIX: Sensor validation functions

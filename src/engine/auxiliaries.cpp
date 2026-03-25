@@ -6,6 +6,7 @@
 
 #include "drv/ckp.h"
 #include "drv/sensors.h"
+#include "hal/system.h"
 #include "hal/tim.h"
 
 namespace {
@@ -22,9 +23,24 @@ constexpr int16_t kIacKp_num = 2;
 constexpr int16_t kIacKd_num = 5;
 constexpr int16_t kIacKd_den = 2;
 constexpr int16_t kIacIClampX10 = 300;
+// Derivative low-pass filter coefficient (0.0-1.0)
+// Lower values = more filtering (less noise, more lag)
+// 0.2 provides good noise rejection while maintaining response
+constexpr int16_t kIacDerivFilterNum = 2;
+constexpr int16_t kIacDerivFilterDen = 10;
 
 constexpr uint32_t kOverboostDurationMs = 500u;
 constexpr uint16_t kOverboostMarginKpaX10 = 200u;
+// Wastegate PID gains
+// P gain: 8/100 = 0.08 (existing)
+// I gain: 1/100 = 0.01 per 20ms sample (existing)
+// D gain: 3/100 = 0.03 (new - for anticipatory response)
+constexpr int16_t kWgKp_num = 8;
+constexpr int16_t kWgKi_num = 1;
+constexpr int16_t kWgKi_den = 100;
+constexpr int16_t kWgKd_num = 3;
+constexpr int16_t kWgKd_den = 100;
+constexpr int16_t kWgIClampX10 = 250;
 
 constexpr uint32_t kVvtConfirmTimeoutMs = 200u;
 
@@ -122,11 +138,13 @@ struct AuxState {
     uint16_t iac_duty_x10;
     int16_t iac_integrator_x10;
     int16_t iac_prev_error_x10;
+    int32_t iac_filtered_deriv_x10;  // Low-pass filtered derivative for noise rejection
     int32_t iac_last_rpm_x10;
     bool iac_have_prev_rpm;
 
     uint16_t wg_duty_x10;
     int16_t wg_integrator_x10;
+    int16_t wg_prev_error_x10;  // For derivative term
     uint32_t wg_overboost_ms;
     bool wg_failsafe;
 
@@ -347,11 +365,15 @@ void run_iac_control(const ems::drv::CkpSnapshot& snap,
             -kIacIClampX10,
             kIacIClampX10);
 
+        // Low-pass filter derivative to reject RPM sensor noise
+        // filtered = filtered + alpha * (raw - filtered)
         const int32_t de_x10 = error_x10 - static_cast<int32_t>(g.iac_prev_error_x10);
-        const int32_t d_x10 = (de_x10 * kIacKd_num) / kIacKd_den;
+        const int32_t raw_deriv_x10 = (de_x10 * kIacKd_num) / kIacKd_den;
+        g.iac_filtered_deriv_x10 = g.iac_filtered_deriv_x10 +
+            ((raw_deriv_x10 - g.iac_filtered_deriv_x10) * kIacDerivFilterNum) / kIacDerivFilterDen;
 
         g.iac_prev_error_x10 = static_cast<int16_t>(clamp_i16(static_cast<int16_t>(error_x10), -12000, 12000));
-        out_x10 += p_x10 + g.iac_integrator_x10 + d_x10;
+        out_x10 += p_x10 + g.iac_integrator_x10 + g.iac_filtered_deriv_x10;
     }
 
     if (out_x10 < 0) {
@@ -388,13 +410,18 @@ void run_wastegate_control(const ems::drv::CkpSnapshot& snap,
     }
 
     const int32_t error = static_cast<int32_t>(target_kpa_x10) - static_cast<int32_t>(s.map_kpa_x10);
-    const int32_t p_x10 = (error * 8) / 100;
+    const int32_t p_x10 = (error * kWgKp_num) / 100;
     g.wg_integrator_x10 = clamp_i16(
-        static_cast<int16_t>(g.wg_integrator_x10 + static_cast<int16_t>(error / 100)),
-        -250,
-        250);
+        static_cast<int16_t>(g.wg_integrator_x10 + static_cast<int16_t>((error * kWgKi_num) / kWgKi_den)),
+        -kWgIClampX10,
+        kWgIClampX10);
 
-    int32_t out = p_x10 + g.wg_integrator_x10;
+    // Derivative term for anticipatory response to rapid pressure changes
+    const int32_t de_x10 = error - static_cast<int32_t>(g.wg_prev_error_x10);
+    const int32_t d_x10 = (de_x10 * kWgKd_num) / kWgKd_den;
+    g.wg_prev_error_x10 = static_cast<int16_t>(clamp_i16(static_cast<int16_t>(error), -12000, 12000));
+
+    int32_t out = p_x10 + g.wg_integrator_x10 + d_x10;
     if (out < 0) {
         out = 0;
     }
@@ -544,7 +571,7 @@ void auxiliaries_set_key_on(bool key_on) noexcept {
 }
 
 void auxiliaries_tick_10ms() noexcept {
-    g.time_ms += kTick10ms;
+    g.time_ms = millis();  // Use actual time source to avoid double-counting
 
     const ems::drv::CkpSnapshot snap = ems::drv::ckp_snapshot();
     const ems::drv::SensorData s = ems::drv::sensors_get();  // cópia atômica
@@ -555,15 +582,15 @@ void auxiliaries_tick_10ms() noexcept {
 }
 
 void auxiliaries_tick_20ms() noexcept {
-    g.time_ms += kTick20ms;
+    g.time_ms = millis();  // Use actual time source to avoid double-counting
 
     const ems::drv::CkpSnapshot snap = ems::drv::ckp_snapshot();
     const ems::drv::SensorData s = ems::drv::sensors_get();  // cópia atômica
 
     run_iac_control(snap, s);
     run_wastegate_control(snap, s);
-    run_fan_control(s.clt_degc_x10);
-    run_pump_control(snap.rpm_x10);
+    // Note: Fan and pump control are handled in auxiliaries_tick_10ms()
+    // to avoid duplicate execution and timing issues
 }
 
 #if defined(EMS_HOST_TEST)

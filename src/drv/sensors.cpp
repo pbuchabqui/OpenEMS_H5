@@ -34,10 +34,14 @@ constexpr uint8_t  kFaultLimit         = 3u;
 constexpr uint16_t kRealTeethPerRev    = 58u;
 constexpr uint16_t kFastSamplesPerRev  = 12u;
 
-constexpr uint16_t kFallbackMapKpaX10  = 1010u;
 constexpr uint16_t kFallbackTpsPctX10  = 0u;
 constexpr int16_t  kFallbackCltDegcX10 = 900;
 constexpr int16_t  kFallbackIatDegcX10 = 250;
+
+// Configurable MAP fallback value (default: 101 kPa for NA applications)
+// For turbo applications, set to typical boost pressure (e.g., 200 kPa)
+// to prevent lean conditions on MAP sensor failure
+static uint16_t g_fallback_map_kpa_x10 = 1010u;  // 101 kPa default
 
 // O runtime host ainda usa a mesma base de tempo do pipeline legado para o
 // cálculo simplificado de MAF por frequência.
@@ -276,7 +280,7 @@ inline void sample_fast_channels() noexcept {
     apply_fault(SensorId::O2,  o2_raw);
 
     g_data.map_kpa_x10 = g_fault[static_cast<uint8_t>(SensorId::MAP)].active
-                         ? kFallbackMapKpaX10
+                         ? g_fallback_map_kpa_x10
                          : map_raw_to_kpa_x10(g_map_filt);
 
     g_data.tps_pct_x10 = g_fault[static_cast<uint8_t>(SensorId::TPS)].active
@@ -446,6 +450,10 @@ void sensors_set_tps_cal(uint16_t raw_min, uint16_t raw_max) noexcept {
 
 void sensors_set_range(SensorId id, SensorRange range) noexcept {
     g_fault[static_cast<uint8_t>(id)].range = range;
+}
+
+void sensors_set_map_fallback_kpa_x10(uint16_t kpa_x10) noexcept {
+    g_fallback_map_kpa_x10 = kpa_x10;
 }
 
 const SensorData& sensors_get() noexcept {

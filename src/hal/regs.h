@@ -56,6 +56,11 @@
 // RCC
 #define RCC_BASE     0x44020C00UL
 
+// PWR (Power Control)
+#define PWR_BASE     0x44024800UL
+#define PWR_DBPCR    STM32_REG32(PWR_BASE + 0x10UL)  // Backup Domain Control Register
+#define PWR_DBPCR_DBP (1u << 8)  // Disable Backup Domain Write Protection
+
 // Flash
 #define FLASH_BASE   0x40022000UL
 
@@ -81,6 +86,8 @@
 #define RCC_AHB2ENR2    STM32_REG32(RCC_BASE + 0x0F0)
 #define RCC_APB1LENR    STM32_REG32(RCC_BASE + 0x0F4)
 #define RCC_APB2ENR     STM32_REG32(RCC_BASE + 0x100)
+#define RCC_AHB4ENR     STM32_REG32(RCC_BASE + 0x108)  // AHB4 peripheral clock enable
+#define RCC_AHB4ENR_BKPSRAMEN (1u << 28)  // Backup SRAM clock enable
 
 // RCC_CR bits
 #define RCC_CR_HSEON    (1u << 16)

@@ -47,4 +47,8 @@ int16_t fuel_update_stft(uint16_t rpm_x10,
 int16_t fuel_get_stft_pct_x10() noexcept;
 int16_t fuel_get_ltft_pct_x10(uint8_t map_idx, uint8_t rpm_idx) noexcept;
 
+// Lambda target lookup for STFT closed-loop control
+// Returns lambda × 1000 (e.g., 1000 = λ1.0, 850 = λ0.85)
+int16_t get_lambda_target(uint16_t rpm_x10, uint16_t map_kpa) noexcept;
+
 }  // namespace ems::engine
