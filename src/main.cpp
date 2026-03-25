@@ -275,10 +275,22 @@ int main() {
                 g_last_gap_sync_snapshot = snap;
             }
 
+            // Overrun fuel cut logic
+            const bool overrun_conditions = synced &&
+                (snap.rpm_x10 > kOverrunCutRpmX10) &&
+                (sensors.tps_pct_x10 < kOverrunCutTpsX10) &&
+                (sensors.clt_degc_x10 > kOverrunCutCltX10);
+
+            if (overrun_conditions) {
+                g_overrun_fuel_cut = true;
+            } else if (sensors.tps_pct_x10 > kOverrunCutResumeTpsX10) {
+                g_overrun_fuel_cut = false;
+            }
+
             const bool rev_cut = g_limp_active &&
                 (snap.rpm_x10 > kLimpRpmLimit_x10);
 
-            if (synced && !rev_cut) {
+            if (synced && !rev_cut && !g_overrun_fuel_cut) {
                 const uint16_t map_kpa = sensors.map_kpa_x10 / 10u;
                 const uint8_t  ve = ems::engine::get_ve(snap.rpm_x10, map_kpa);
                 const uint32_t base_pw_us =
@@ -301,6 +313,8 @@ int main() {
                 const int16_t advance_deg10 =
                     ems::engine::get_advance(snap.rpm_x10, map_kpa);
                 g_last_advance_deg = static_cast<int8_t>(advance_deg10 / 10);
+            } else if (g_overrun_fuel_cut) {
+                g_last_pw_ms_x10 = 0;  // Cut fuel during overrun
             }
 
             // Limp mode: MAP ou CLT em fault
