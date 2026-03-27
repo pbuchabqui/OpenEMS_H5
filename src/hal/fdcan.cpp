@@ -66,8 +66,7 @@ void fdcan_init() noexcept {
                | ((5u  & 0x7Fu)  << 0);    // NTSEG2 = 5  → 6 TQ
 
     // Data bit timing: DBRP+1=1 → Tq=16ns; (DTSEG1+DTSEG2+3)=25 → 25×16ns=400ns → 2.5 Mbps
-    FDCAN1_DBTP = ((0u  & 0x1Fu)  << 16)   // DBRP = 0 → prescaler = 1
-               | ((18u & 0x1Fu)  << 8)     // DTSEG1 = 18 → 19 TQ (80% sample point)
+    FDCAN1_DBTP = ((18u & 0x1Fu)  << 8)     // DTSEG1 = 18 → 19 TQ (80% sample point)
                | ((4u  & 0xFu)   << 4)     // DTSEG2 = 4  → 5 TQ
                | ((3u  & 0xFu)   << 0);    // DSJW = 3
 
@@ -84,8 +83,7 @@ void fdcan_init() noexcept {
       | (0x180u << 0);    // SFID2 = 0x180
 
     // Global filter: reject non-matching frames
-    FDCAN1_RXGFC = (0u << 8)    // LSS = 0 (standard filter count)
-                 | (1u << 0)    // RRFE: reject remote frames with extended ID
+    FDCAN1_RXGFC = (1u << 0)    // RRFE: reject remote frames with extended ID
                  | (2u << 4)    // ANFS: non-matching std → reject
                  | (2u << 2);   // ANFE: non-matching ext → reject
 

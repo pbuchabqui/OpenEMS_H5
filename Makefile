@@ -27,6 +27,7 @@ CPP_SRCS := \
     $(SRC_DIR)/hal/system.cpp \
     $(SRC_DIR)/hal/tim.cpp \
     $(SRC_DIR)/hal/adc.cpp \
+    $(SRC_DIR)/hal/dac.cpp \
     $(SRC_DIR)/hal/fdcan.cpp \
     $(SRC_DIR)/hal/cordic.cpp \
     $(SRC_DIR)/hal/flash_nvm.cpp \

@@ -8,7 +8,7 @@
 
 // CRITICAL FIX: Add debug assertions for safety-critical parameters
 #ifndef NDEBUG
-#define ASSERT_VALID_RPM_X10(rpm) assert((rpm) >= 0 && (rpm) <= 200000)  // 0-20000 RPM ×10
+#define ASSERT_VALID_RPM_X10(rpm) assert((rpm) <= 200000)  // 0-20000 RPM ×10
 #define ASSERT_VALID_MAP_KPA(map) assert((map) >= 10 && (map) <= 300)   // 10-300 kPa
 #define ASSERT_VALID_TEMP_X10(temp) assert((temp) >= -400 && (temp) <= 1500)  // -40°C to +150°C ×10
 #define ASSERT_VALID_VE(ve) assert((ve) <= 255)  // VE 0-255%

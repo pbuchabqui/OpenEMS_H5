@@ -9,60 +9,68 @@
  *
  * Todos os endereços baseados em:
  *   RM0481 — STM32H562/H563/H573 Reference Manual Rev 2 (ST Microelectronics)
+ *
+ * MISRA C++:2023 Compliance Notes:
+ *   - Macros STM32_REG32/STM32_REG16 are necessary for MMIO register access
+ *     (reinterpret_cast to volatile pointers is the only portable way)
+ *   - Base addresses use constexpr for type safety
+ *   - Bit-field macros kept as macros for preprocessor compatibility
  */
 
 #include <cstdint>
 
 // ─── Macro de acesso a registrador ────────────────────────────────────────────
+// MISRA C++:2023 Rule 20.0.1: Macro justified for MMIO access pattern
+// Reason: Volatile pointer casting to arbitrary addresses requires macro
 #define STM32_REG32(addr)  (*reinterpret_cast<volatile uint32_t*>(addr))
 #define STM32_REG16(addr)  (*reinterpret_cast<volatile uint16_t*>(addr))
 
 // ─── Bases dos periféricos (RM0481 §3.3, Memory Map) ─────────────────────────
 // AHB1
-#define GPIOA_BASE   0x42020000UL
-#define GPIOB_BASE   0x42020400UL
-#define GPIOC_BASE   0x42020800UL
-#define GPIOD_BASE   0x42020C00UL
-#define GPIOE_BASE   0x42021000UL
+inline constexpr uint32_t GPIOA_BASE   = 0x42020000UL;
+inline constexpr uint32_t GPIOB_BASE   = 0x42020400UL;
+inline constexpr uint32_t GPIOC_BASE   = 0x42020800UL;
+inline constexpr uint32_t GPIOD_BASE   = 0x42020C00UL;
+inline constexpr uint32_t GPIOE_BASE   = 0x42021000UL;
 
 // APB2
-#define TIM1_BASE    0x40012C00UL
-#define TIM8_BASE    0x40013400UL
-#define TIM15_BASE   0x40014000UL
-#define USART1_BASE  0x40013800UL
+inline constexpr uint32_t TIM1_BASE    = 0x40012C00UL;
+inline constexpr uint32_t TIM8_BASE    = 0x40013400UL;
+inline constexpr uint32_t TIM15_BASE   = 0x40014000UL;
+inline constexpr uint32_t USART1_BASE  = 0x40013800UL;
 
 // APB1
-#define TIM2_BASE    0x40000000UL
-#define TIM3_BASE    0x40000400UL
-#define TIM5_BASE    0x40000C00UL
-#define TIM6_BASE    0x40001000UL
-#define TIM12_BASE   0x40001800UL
-#define USART2_BASE  0x40004400UL
+inline constexpr uint32_t TIM2_BASE    = 0x40000000UL;
+inline constexpr uint32_t TIM3_BASE    = 0x40000400UL;
+inline constexpr uint32_t TIM5_BASE    = 0x40000C00UL;
+inline constexpr uint32_t TIM6_BASE    = 0x40001000UL;
+inline constexpr uint32_t TIM12_BASE   = 0x40001800UL;
+inline constexpr uint32_t USART2_BASE  = 0x40004400UL;
 
 // AHB1
-#define ADC1_BASE    0x42028000UL
-#define ADC2_BASE    0x42028100UL
-#define ADC12_COMMON 0x42028300UL
-#define CORDIC_BASE  0x46020C00UL
-#define USB_OTG_FS_BASE 0x50000000UL
+inline constexpr uint32_t ADC1_BASE    = 0x42028000UL;
+inline constexpr uint32_t ADC2_BASE    = 0x42028100UL;
+inline constexpr uint32_t ADC12_COMMON = 0x42028300UL;
+inline constexpr uint32_t CORDIC_BASE  = 0x46020C00UL;
+inline constexpr uint32_t USB_OTG_FS_BASE = 0x50000000UL;
 
 // APB1 — FDCAN
-#define FDCAN1_BASE  0x4000A400UL
-#define FDCAN_SRAM   0x4000AC00UL   // Message RAM
+inline constexpr uint32_t FDCAN1_BASE  = 0x4000A400UL;
+inline constexpr uint32_t FDCAN_SRAM   = 0x4000AC00UL;   // Message RAM
 
 // APB1 — IWDG
-#define IWDG_BASE    0x40003000UL
+inline constexpr uint32_t IWDG_BASE    = 0x40003000UL;
 
 // RCC
-#define RCC_BASE     0x44020C00UL
+inline constexpr uint32_t RCC_BASE     = 0x44020C00UL;
 
 // PWR (Power Control)
-#define PWR_BASE     0x44024800UL
+inline constexpr uint32_t PWR_BASE     = 0x44024800UL;
 #define PWR_DBPCR    STM32_REG32(PWR_BASE + 0x10UL)  // Backup Domain Control Register
 #define PWR_DBPCR_DBP (1u << 8)  // Disable Backup Domain Write Protection
 
 // Flash
-#define FLASH_BASE   0x40022000UL
+inline constexpr uint32_t FLASH_BASE   = 0x40022000UL;
 
 // ─── RCC (Reset and Clock Control) ───────────────────────────────────────────
 #define RCC_CR          STM32_REG32(RCC_BASE + 0x000)
@@ -750,6 +758,8 @@ static inline void nvic_set_priority(uint8_t irq, uint8_t prio) noexcept {
 #define IRQ_TIM5         48u
 #define IRQ_ADC1         49u
 #define IRQ_FDCAN1_IT0   50u
+#define IRQ_TIM6         54u   // TIM6 global interrupt (datalog)
+#define IRQ_TIM7         55u   // TIM7 global interrupt (watchdog)
 #define IRQ_OTG_FS       67u
 #define IRQ_CORDIC       69u
 #define IRQ_TIM8_CC      100u

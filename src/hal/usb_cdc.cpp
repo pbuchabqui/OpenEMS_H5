@@ -102,7 +102,6 @@ inline void usb_handle_setup() noexcept {
     const uint8_t bmRequestType = g_ep0_setup[0];
     const uint8_t bRequest = g_ep0_setup[1];
     const uint16_t wValue = static_cast<uint16_t>(g_ep0_setup[2] | (g_ep0_setup[3] << 8));
-    const uint16_t wIndex = static_cast<uint16_t>(g_ep0_setup[4] | (g_ep0_setup[5] << 8));
     const uint16_t wLength = static_cast<uint16_t>(g_ep0_setup[6] | (g_ep0_setup[7] << 8));
 
     const uint8_t type = bmRequestType & 0x60;

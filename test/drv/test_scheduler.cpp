@@ -86,6 +86,55 @@ void test_recalc_is_noop_for_absolute_scheduler() {
     TEST_ASSERT_TRUE(ems::drv::sched_test_is_armed(ems::drv::Channel::INJ3));
 }
 
+/**
+ * @brief Prompt 3, Entregável #2: Teste de conversão 32→16 bit para scheduler
+ * 
+ * Verifica que timestamps absolutos 32-bit são corretamente convertidos para 16-bit
+ * via cast simples, graças à sincronização hardware TIM5→TIM1/TIM8 via ITR.
+ */
+void test_scheduler_32bit_to_16bit_conversion() {
+    reset_all();
+    
+    // Testar vários valores 32-bit que devem ser convertidos corretamente
+    const uint32_t test_values[] = {
+        0x0000ABCDu,  // Valor baixo
+        0x0001ABCDu,  // Valor com upper 16 bits
+        0x1234ABCDu,  // Valor alto
+        0xFFFFFFFFu,  // Overflow
+        0x00000000u   // Zero
+    };
+    
+    for (size_t i = 0; i < sizeof(test_values) / sizeof(test_values[0]); ++i) {
+        const uint32_t abs_ticks = test_values[i];
+        const uint16_t expected_hw = static_cast<uint16_t>(abs_ticks);
+        
+        static_cast<void>(ems::drv::sched_event(ems::drv::Channel::INJ1, abs_ticks, ems::drv::Action::SET));
+        TEST_ASSERT_EQ_U32(expected_hw, ems::hal::tim_test_get_compare(1u, 0u));
+        ems::drv::sched_cancel(ems::drv::Channel::INJ1);
+    }
+}
+
+/**
+ * @brief Teste de eventos no passado (CORREÇÃO C2/H8)
+ * 
+ * Verifica que eventos no passado são rejeitados pelo scheduler
+ */
+void test_scheduler_rejects_past_events() {
+    reset_all();
+    
+    // Simular tempo atual
+    ems::hal::tim_test_set_counter(5u, 1000u);
+    
+    // Evento no futuro: deve ser aceito
+    TEST_ASSERT_TRUE(ems::drv::sched_event(ems::drv::Channel::INJ1, 2000u, ems::drv::Action::SET));
+    TEST_ASSERT_TRUE(ems::drv::sched_test_is_armed(ems::drv::Channel::INJ1));
+    ems::drv::sched_cancel(ems::drv::Channel::INJ1);
+    
+    // Evento no passado: deve ser rejeitado
+    TEST_ASSERT_TRUE(!ems::drv::sched_event(ems::drv::Channel::INJ1, 500u, ems::drv::Action::SET));
+    TEST_ASSERT_TRUE(!ems::drv::sched_test_is_armed(ems::drv::Channel::INJ1));
+}
+
 }  // namespace
 
 int main() {
@@ -95,6 +144,8 @@ int main() {
     test_cancel_disarms_channel();
     test_isr_disarms_timer_groups();
     test_recalc_is_noop_for_absolute_scheduler();
+    test_scheduler_32bit_to_16bit_conversion();
+    test_scheduler_rejects_past_events();
 
     std::printf("tests=%d failed=%d\n", g_tests_run, g_tests_failed);
     return (g_tests_failed == 0) ? 0 : 1;

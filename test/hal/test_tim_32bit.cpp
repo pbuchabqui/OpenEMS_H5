@@ -7,6 +7,9 @@
  *   - TIM5→TIM1 sync: (uint16_t)(0x0001ABCD) == 0xABCD
  *
  * Framework: Unity-compatible (host test runner)
+ * 
+ * ⚡ OPT-1/OPT-2: Verifica eliminação de bugs de overflow de timestamp
+ * ⚡ OPT-8: Verifica sincronização hardware TIM5→TIM1 via ITR
  */
 
 #include <cstdint>

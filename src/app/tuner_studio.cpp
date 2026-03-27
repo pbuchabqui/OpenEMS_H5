@@ -248,7 +248,7 @@ inline void sync_page_from_table(uint8_t page) noexcept {
 inline void sync_table_from_page(uint8_t page) noexcept {
     if (page == 0x00u) {
         /* Page 0, byte 0: ivc_abdc_deg */
-        ::ecu_sched_set_ivc(g_page0[0]);
+        ems::engine::ecu_sched_set_ivc(g_page0[0]);
     } else if (page == 0x01u) {
         std::memcpy(ems::engine::ve_table, g_page1_ve, sizeof(g_page1_ve));
     } else if (page == 0x02u) {
@@ -411,7 +411,7 @@ inline void parse_byte(uint8_t b) noexcept {
 inline void reset_pages() noexcept {
     std::memset(g_page0, 0, sizeof(g_page0));
     g_page0[0] = 50u;  /* ivc_abdc_deg padrão: 50° ABDC */
-    ::ecu_sched_set_ivc(g_page0[0]);
+    ems::engine::ecu_sched_set_ivc(g_page0[0]);
     std::memcpy(g_page1_ve,    ems::engine::ve_table,    sizeof(g_page1_ve));
     std::memcpy(g_page2_spark, ems::engine::spark_table, sizeof(g_page2_spark));
     std::memset(g_page3_rt, 0, sizeof(g_page3_rt));

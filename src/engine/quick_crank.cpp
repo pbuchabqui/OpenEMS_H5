@@ -177,7 +177,6 @@ QuickCrankOutput quick_crank_update(uint32_t now_ms,
                                     int16_t base_spark_deg) noexcept {
     QuickCrankOutput out{};
     out.spark_deg = base_spark_deg;
-    out.fuel_mult_x256 = 256u;
     out.min_pw_us = 0u;
     out.prime_pw_us = g_prime_pw_us;  // informativo — disparo é feito via consume_prime()
 

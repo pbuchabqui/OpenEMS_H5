@@ -159,8 +159,7 @@ void adc_init() noexcept {
     // CFGR1: 12-bit, trigger externo TIM2_TRGO, rising edge
     // EXTSEL = TIM2_TRGO = 0001b (RM0481 Table 68)
     // EXTEN = 01b = rising edge
-    ADC1_CFGR1 = (0x00u << 3u)    // RES[1:0] = 00 → 12-bit
-               | (0x01u << 6u)    // EXTSEL[3:0] = 0001 → TIM2_TRGO
+    ADC1_CFGR1 = (0x01u << 6u)    // EXTSEL[3:0] = 0001 → TIM2_TRGO
                | (0x01u << 10u);  // EXTEN[1:0] = 01 → rising edge
 
     // ⚡ OPT-6: Hardware oversampling
@@ -252,7 +251,7 @@ static uint16_t g_adc2_mock[5] = {};
 static uint16_t g_last_pdb_mod = 0u;
 
 void     adc_init() noexcept {}
-void     adc_pdb_on_tooth(uint16_t t) noexcept { g_last_pdb_mod = t; }
+void     adc_pdb_on_tooth(uint16_t tooth_period_ticks) noexcept { g_last_pdb_mod = tooth_period_ticks; }
 uint16_t adc1_read(Adc1Channel ch) noexcept {
     const uint8_t idx = static_cast<uint8_t>(ch);
     return (idx < 3u) ? g_adc1_mock[idx] : 0u;
@@ -261,13 +260,13 @@ uint16_t adc2_read(Adc2Channel ch) noexcept {
     const uint8_t idx = static_cast<uint8_t>(ch);
     return (idx < 5u) ? g_adc2_mock[idx] : 0u;
 }
-void adc_test_set_raw_adc2(Adc2Channel ch, uint16_t v) noexcept {
+void adc_test_set_raw_adc2(Adc2Channel ch, uint16_t raw) noexcept {
     const uint8_t idx = static_cast<uint8_t>(ch);
-    if (idx < 5u) { g_adc2_mock[idx] = v; }
+    if (idx < 5u) { g_adc2_mock[idx] = raw; }
 }
-void     adc_test_set_raw_adc1(Adc1Channel ch, uint16_t v) noexcept {
+void     adc_test_set_raw_adc1(Adc1Channel ch, uint16_t raw) noexcept {
     const uint8_t idx = static_cast<uint8_t>(ch);
-    if (idx < 3u) { g_adc1_mock[idx] = v; }
+    if (idx < 3u) { g_adc1_mock[idx] = raw; }
 }
 uint16_t adc_test_last_pdb_mod() noexcept { return g_last_pdb_mod; }
 

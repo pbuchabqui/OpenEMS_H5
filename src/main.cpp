@@ -168,8 +168,8 @@ static void openems_init() noexcept {
     //   RCC->AHB4ENR |= RCC_AHB4ENR_BKPSRAMEN; // enable clock
     // Endereço base: 0x38800000. Sem esta inicialização, bkpsram_write_crash()
     // escreveria em memória não mapeada.
-    PWR->DBPCR |= PWR_DBPCR_DBP;
-    RCC->AHB4ENR |= RCC_AHB4ENR_BKPSRAMEN;
+    PWR_DBPCR |= PWR_DBPCR_DBP;
+    RCC_AHB4ENR |= RCC_AHB4ENR_BKPSRAMEN;
     ems::hal::flash_nvm_init();
     static_cast<void>(
         ems::hal::nvm_load_calibration(0u, g_calib_page0, kCalibPageBytes));
@@ -217,6 +217,10 @@ static void openems_init() noexcept {
     nvic_enable_irq(IRQ_ADC1);
     nvic_set_priority(IRQ_FDCAN1_IT0, 6u);  // ⚡ CORREÇÃO H5: CAN-FD RX
     nvic_enable_irq(IRQ_FDCAN1_IT0);
+    nvic_set_priority(IRQ_TIM7,  11u);    // watchdog
+    nvic_enable_irq(IRQ_TIM7);
+    nvic_set_priority(IRQ_TIM6,  12u);    // datalog
+    nvic_enable_irq(IRQ_TIM6);
 
     // 10) Aguardar CKP sync (timeout 5 s)
     const uint32_t sync_deadline = millis() + 5000u;

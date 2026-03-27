@@ -172,8 +172,7 @@ void system_stm32_init(void) noexcept {
 
     // ── 3. Configurar PLL1: HSE=8 MHz / M=1 × N=125 / P=4 = 250 MHz ────
     // PLL1CFGR: PLLSRC=HSE (01b), DIVM1=1 (M-1 = 0)
-    RCC_PLL1CFGR = (1u << 0)   // PLLSRC = HSE (bits [1:0] = 01)
-                 | (0u << 8);  // DIVM1 = 1 (valor M-1 = 0, bits [13:8])
+    RCC_PLL1CFGR = (1u << 0);  // PLLSRC = HSE (bits [1:0] = 01)
     // PLL1DIVR: N=125 (DIVN1 = N-1 = 124), P=4 (DIVP1 = P/2-1 = 1),
     //           Q=16 (DIVQ1 = Q/2-1 = 7) → PLL1Q = 1000/16 = 62.5 MHz (FDCAN clock)
     // VCO = HSE × N / M = 8 × 125 / 1 = 1000 MHz
@@ -209,8 +208,7 @@ void system_stm32_init(void) noexcept {
     // ── 6. Configurar prescalers APB (manter AHB = SYSCLK) ───────────────
     // CFGR1: AHB prescaler = 1 (HPRE=0), APB1=/2 (PPRE1=100b), APB2=/2 (PPRE2=100b)
     // Para simplificar timers: usar APB1=APB2=HCLK/2 → timer clock = 2×APB = HCLK
-    RCC_CFGR1 = (0u << 4)    // HPRE = 0  → HCLK = SYSCLK
-              | (4u << 8)    // PPRE1 = 4 → APB1 = HCLK/2 = 125 MHz
+    RCC_CFGR1 = (4u << 8)    // PPRE1 = 4 → APB1 = HCLK/2 = 125 MHz
               | (4u << 11);  // PPRE2 = 4 → APB2 = HCLK/2 = 125 MHz
 
     // ── 7. Selecionar PLL1 como SYSCLK ───────────────────────────────────

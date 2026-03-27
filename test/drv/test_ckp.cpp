@@ -114,6 +114,29 @@ void test_circular_subtraction() {
     TEST_ASSERT_EQ_U32(100u, snap.tooth_period_ticks);
 }
 
+/**
+ * @brief Prompt 2, Entregável #2: Teste de 32-bit wrap para CKP
+ * 
+ * Cenário: capture wrap de 0xFFFFFF00→0x100
+ * Verifica que o delta circular funciona corretamente sem overflow de 16-bit
+ */
+void test_ckp_32bit_wrap_prompt_case() {
+    test_reset();
+    ems_test_ckp_gpio_idr = (1u << 0u);
+    
+    // Primeiro capture: 0xFFFFFF00
+    ems_test_ckp_capture_ch0 = 0xFFFFFF00u;
+    ems::drv::ckp_capture_primary_isr();
+    
+    // Segundo capture: 0x00000100 (após overflow)
+    ems_test_ckp_capture_ch0 = 0x00000100u;
+    ems::drv::ckp_capture_primary_isr();
+    
+    const auto snap = ems::drv::ckp_snapshot();
+    // Delta esperado: (0x00000100 - 0xFFFFFF00) = 0x00000200 = 512 ticks
+    TEST_ASSERT_EQ_U32(512u, snap.tooth_period_ticks);
+}
+
 void test_tooth_count_over_60_loses_sync() {
     test_reset();
     sync_with_two_gaps();
@@ -220,6 +243,7 @@ int main() {
     test_false_gap_ignored_before_tooth55();
     test_rpm_formula();
     test_circular_subtraction();
+    test_ckp_32bit_wrap_prompt_case();
     test_tooth_count_over_60_loses_sync();
     test_rpm_zero_before_sync();
     test_phase_a_toggles_on_ch1();
